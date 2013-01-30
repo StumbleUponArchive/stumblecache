@@ -78,4 +78,8 @@ page 1-x: index, b-tree
 
           - in use:               1 bit
 
+License
+============
+This extension is released under the PHP 3.01 license, see LICENSE file for details
 
+This product includes PHP software, freely available from <http://www.php.net/software/>

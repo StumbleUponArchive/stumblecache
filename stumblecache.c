@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | PHP Version 5                                                        |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2011 StumbleUpon Inc.                             |
+   | Copyright (c) 2010-2013 StumbleUpon Inc.                             |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,7 +15,6 @@
    | Authors: Derick Rethans <derick@derickrethans.nl>                    |
    +----------------------------------------------------------------------+
  */
-/* $Id$ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
