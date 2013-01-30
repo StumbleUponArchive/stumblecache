@@ -10,4 +10,5 @@ int main(void)
 		dr_set_dump(set);
 		dr_set_free(set);
 	}
+	return 0;
 }

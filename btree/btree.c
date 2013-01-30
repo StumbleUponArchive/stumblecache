@@ -41,7 +41,7 @@ static int btree_admin_lock(btree_tree *t)
 	fls.l_len    = t->data - t->mmap;
 
 #if LOCK_DEBUG
-	printf("LOCKW   %4x - %4x\n", fls.l_start, fls.l_len);
+	printf("LOCKW   %4x - %4x\n", (unsigned int) fls.l_start, (unsigned int) fls.l_len);
 #endif
 
 	if (fcntl(t->fd, F_SETLKW, &fls) == -1) {
@@ -60,7 +60,7 @@ static int btree_admin_unlock(btree_tree *t)
 	fls.l_len    = t->data - t->mmap;
 
 #if LOCK_DEBUG
-	printf("UNLOCK  %4x - %4x", fls.l_start, fls.l_len);
+	printf("UNLOCK  %4x - %4x", (unsigned int) fls.l_start, (unsigned int) fls.l_len);
 #endif
 
 	if (fcntl(t->fd, F_SETLKW, &fls) == -1) {
@@ -85,7 +85,7 @@ inline static int btree_data_lock_helper(btree_tree *t, uint32_t idx, short type
 	fls.l_len    = t->header->item_size + BTREE_DATA_EXTRA;
 
 #if LOCK_DEBUG
-	printf("%7s %4x - %4x", type == F_RDLCK ? "DLOCKR" : (type == F_WRLCK ? "DLOCKW" : "UNLOCKD" ), fls.l_start, fls.l_len);
+	printf("%7s %4x - %4x", type == F_RDLCK ? "DLOCKR" : (type == F_WRLCK ? "DLOCKW" : "UNLOCKD" ), (unsigned int) fls.l_start, (unsigned int) fls.l_len);
 #endif
 
 	if (fcntl(t->fd, F_SETLKW, &fls) == -1) {
