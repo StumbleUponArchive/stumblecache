@@ -17,32 +17,16 @@
    +----------------------------------------------------------------------+
  */
 
-#ifndef PHP_STUMBLECACHE_H
-#define PHP_STUMBLECACHE_H
+#ifndef PHP_STUMBLECACHE_INTERNAL_H
+#define PHP_STUMBLECACHE_INTERNAL_H
 
-extern zend_module_entry stumblecache_module_entry;
-#define phpext_stumblecache_ptr &stumblecache_module_entry
+#include "php.h"
+#include "btree/btree.h"
 
-#define PHP_STUMBLECACHE_VERSION "1.0.0-dev"
-
-#ifdef ZTS
-#include "TSRM.h"
-#endif
-
-PHP_MINIT_FUNCTION(stumblecache);
-PHP_MINFO_FUNCTION(stumblecache);
-
-ZEND_BEGIN_MODULE_GLOBALS(stumblecache)
-	char *default_cache_dir;
-	long  default_ttl;
-ZEND_END_MODULE_GLOBALS(stumblecache) 
-
-typedef struct _php_stumblecache_obj php_stumblecache_obj;
-
-#ifdef ZTS
-# define STUMBLECACHE_G(v) TSRMG(stumblecache_globals_id, zend_stumblecache_globals *, v)
-#else
-# define STUMBLECACHE_G(v) (stumblecache_globals.v)
-#endif
+struct _php_stumblecache_obj {
+	zend_object   std;
+	btree_tree   *cache;
+	char         *path;
+};
 
 #endif

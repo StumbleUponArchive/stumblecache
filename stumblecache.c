@@ -26,9 +26,12 @@
 #include "php.h"
 #include "zend.h"
 #include "zend_alloc.h"
-#include "php_stumblecache.h"
 #include "php_globals.h"
 #include "ext/standard/info.h"
+
+#include "php_stumblecache.h"
+#include "php_stumblecache_internal.h"
+
 #include "ext/igbinary/igbinary.h"
 
 zend_function_entry stumblecache_functions[] = {
@@ -48,9 +51,9 @@ zend_module_entry stumblecache_module_entry = {
 	"stumblecache",
 	stumblecache_functions,
 	PHP_MINIT(stumblecache),
-	PHP_MSHUTDOWN(stumblecache),
-	PHP_RINIT(stumblecache),
-	PHP_RSHUTDOWN(stumblecache),
+	NULL,
+	NULL,
+	NULL,
 	PHP_MINFO(stumblecache),
 #if ZEND_MODULE_API_NO >= 20010901
 	"0.0.1",
@@ -485,24 +488,6 @@ PHP_MINIT_FUNCTION(stumblecache)
 
 	stumblecache_register_class(TSRMLS_C);
 
-	return SUCCESS;
-}
-
-
-PHP_MSHUTDOWN_FUNCTION(stumblecache)
-{
-	return SUCCESS;
-}
-
-
-PHP_RINIT_FUNCTION(stumblecache)
-{
-	return SUCCESS;
-}
-
-
-PHP_RSHUTDOWN_FUNCTION(stumblecache)
-{
 	return SUCCESS;
 }
 
