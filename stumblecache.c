@@ -31,7 +31,7 @@
 #include "ext/igbinary/igbinary.h"
 
 /* ----------------------------------------------------------------
-	Globals Management
+	Globals and INI Management
 ------------------------------------------------------------------*/
 
 ZEND_DECLARE_MODULE_GLOBALS(stumblecache)
@@ -61,6 +61,9 @@ static void stumblecache_init_globals(zend_stumblecache_globals *stumblecache_gl
 	Extension Definition
 ------------------------------------------------------------------*/
 
+/* Forward declaration of code to register class */
+void stumblecache_register_class(TSRMLS_D);
+
 /* {{{ stumblecache requires igbinary for serialization */
 static const zend_module_dep stumblecache_module_deps[] = {
 	ZEND_MOD_REQUIRED("igbinary")
@@ -68,7 +71,7 @@ static const zend_module_dep stumblecache_module_deps[] = {
 };
 /* }}} */
 
-/* {{{ stumblecache_module_entry */
+/* {{{ module entry has only minit, minfo, deps and version */
 zend_module_entry stumblecache_module_entry = {
 	STANDARD_MODULE_HEADER_EX,
 	NULL,
@@ -90,7 +93,6 @@ ZEND_GET_MODULE(stumblecache)
 #endif
 
 /* {{{ init our globals and register our class */
-void stumblecache_register_class(TSRMLS_D);
 PHP_MINIT_FUNCTION(stumblecache)
 {
 	ZEND_INIT_MODULE_GLOBALS(stumblecache, stumblecache_init_globals, NULL);
@@ -118,14 +120,16 @@ PHP_MINFO_FUNCTION(stumblecache)
 	StumbleCache Class Definition
 ------------------------------------------------------------------*/
 
-/* class points, object handlers, object struct */
+/* class entry, object handlers, object struct */
 struct _php_stumblecache_obj {
 	zend_object   std;
 	btree_tree   *cache;
 	char         *path;
+	zend_bool     is_constructed;
 };
-zend_class_entry *stumblecache_ce;
-zend_object_handlers stumblecache_object_handlers;
+static zend_class_entry *stumblecache_ce;
+static zend_object_handlers stumblecache_object_handlers;
+static zend_function stumblecache_ctor_wrapper_func;
 
 /* memory management struct and helpers */
 struct stumblecache_mm_context {
@@ -157,8 +161,10 @@ PHP_METHOD(StumbleCache, getInfo);
 PHP_METHOD(StumbleCache, getPath);
 PHP_METHOD(StumbleCache, dump);
 PHP_METHOD(StumbleCache, add);
+PHP_METHOD(StumbleCache, replace);
 PHP_METHOD(StumbleCache, remove);
 PHP_METHOD(StumbleCache, fetch);
+PHP_METHOD(StumbleCache, exists);
 
 /* Reflection information */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_construct, 0, 0, 1)
@@ -180,6 +186,15 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_add, 0, 0, 2)
 	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_replace, 0, 0, 2)
+	ZEND_ARG_INFO(0, key)
+	ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_exists, 0, 0, 1)
+	ZEND_ARG_INFO(0, key)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_remove, 0, 0, 1)
 	ZEND_ARG_INFO(0, key)
 ZEND_END_ARG_INFO()
@@ -196,21 +211,16 @@ zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, getPath,         arginfo_stumblecache_getpath,   ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, dump,            arginfo_stumblecache_dump,      ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, add,             arginfo_stumblecache_add,       ZEND_ACC_PUBLIC)
+	PHP_ME(StumbleCache, replace,         arginfo_stumblecache_replace,   ZEND_ACC_PUBLIC)
+	PHP_ME(StumbleCache, exists,          arginfo_stumblecache_exists,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, remove,          arginfo_stumblecache_remove,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
 /* Class helper functions */
-zval *stumblecache_instantiate(zend_class_entry *pce, zval *object TSRMLS_DC)
-{
-	Z_TYPE_P(object) = IS_OBJECT;
-	object_init_ex(object, pce);
-	Z_SET_REFCOUNT_P(object, 1);
-	Z_UNSET_ISREF_P(object);
-	return object;
-}
 
+/* {{{ free information from object struct */
 static void stumblecache_object_free_storage(void *object TSRMLS_DC)
 {
 	php_stumblecache_obj *intern = (php_stumblecache_obj *) object;
@@ -229,36 +239,84 @@ static void stumblecache_object_free_storage(void *object TSRMLS_DC)
 	zend_object_std_dtor(&intern->std TSRMLS_CC);
 	efree(object);
 }
+/* }}} */
 
-static inline zend_object_value stumblecache_object_new_ex(zend_class_entry *class_type, php_stumblecache_obj **ptr TSRMLS_DC)
+/* {{{ set up internal information for the object struct */
+static inline zend_object_value stumblecache_object_new(zend_class_entry *class_type TSRMLS_DC)
 {
 	php_stumblecache_obj *intern;
 	zend_object_value retval;
 	zval *tmp;
 
-	intern = emalloc(sizeof(php_stumblecache_obj));
-	memset(intern, 0, sizeof(php_stumblecache_obj));
-	if (ptr) {
-		*ptr = intern;
-	}
+	intern = ecalloc(1, sizeof(php_stumblecache_obj));
 
 	zend_object_std_init(&intern->std, class_type TSRMLS_CC);
-#if PHP_MINOR_VERSION > 3
+#if PHP_VERSION_ID >= 50400 
 	object_properties_init(&intern->std, class_type);
 #else
 	zend_hash_copy(intern->std.properties, &class_type->default_properties, (copy_ctor_func_t) zval_add_ref, (void *) &tmp, sizeof(zval *));
 #endif
+	intern->cache = NULL;
+	intern->path = NULL;
+	intern->is_constructed = 0;
 	
 	retval.handle = zend_objects_store_put(intern, (zend_objects_store_dtor_t)zend_objects_destroy_object, (zend_objects_free_object_storage_t) stumblecache_object_free_storage, NULL TSRMLS_CC);
 	retval.handlers = &stumblecache_object_handlers;
 	
 	return retval;
 }
+/* }}} */
 
-static zend_object_value stumblecache_object_new(zend_class_entry *class_type TSRMLS_DC)
+/* {{{ make our object subclassable */
+static zend_function *stumblecache_get_constructor(zval *object TSRMLS_DC)
 {
-	return stumblecache_object_new_ex(class_type, NULL TSRMLS_CC);
+	if (Z_OBJCE_P(object) == stumblecache_ce) {
+		return zend_get_std_object_handlers()->get_constructor(object TSRMLS_CC);\
+	} else {
+        	return &stumblecache_ctor_wrapper_func;
+ 	}
 }
+/* }}} */
+
+/* {{{ our constructor wrapper */
+static void stumblecache_constructor_wrapper(INTERNAL_FUNCTION_PARAMETERS) {
+    zend_fcall_info_cache fci_cache = {0};
+    zend_fcall_info fci = {0};
+    zend_class_entry *this_ce;
+    zend_function *zf;
+    php_stumblecache_obj *obj;
+    zval *_this = getThis(), *retval_ptr = NULL;
+
+    obj = zend_object_store_get_object(_this TSRMLS_CC);
+    zf = zend_get_std_object_handlers()->get_constructor(_this TSRMLS_CC);
+    this_ce = Z_OBJCE_P(_this);
+
+    fci.size = sizeof(fci);
+    fci.function_table = &this_ce->function_table;
+    fci.retval_ptr_ptr = &retval_ptr;
+    fci.object_ptr = _this;
+    fci.param_count = ZEND_NUM_ARGS();
+    fci.params = emalloc(fci.param_count * sizeof *fci.params);
+    fci.no_separation = 0;
+    _zend_get_parameters_array_ex(fci.param_count, fci.params TSRMLS_CC);
+
+    fci_cache.initialized = 1;
+    fci_cache.called_scope = EG(current_execute_data)->called_scope;
+    fci_cache.calling_scope = EG(current_execute_data)->current_scope;
+    fci_cache.function_handler = zf;
+    fci_cache.object_ptr = _this;
+
+    zend_call_function(&fci, &fci_cache TSRMLS_CC);
+
+    if (!EG(exception) && obj->is_constructed == 0)
+        zend_throw_exception_ex(NULL, 0 TSRMLS_CC,
+            "parent::__construct() must be called in %s::__construct()", this_ce->name);
+
+    efree(fci.params);
+    zval_ptr_dtor(&retval_ptr);
+}
+/* }}} */
+
 
 static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_items, uint32_t *max_datasize TSRMLS_DC)
 {
@@ -303,6 +361,7 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 	}
 	return 0;
 }
+/* }}} */
 
 static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zval *options TSRMLS_DC)
 {
@@ -330,6 +389,7 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 		}
 	}
 	obj->path = path;
+	obj->is_constructed = 1;
 	return 1;
 }
 
@@ -342,6 +402,22 @@ void stumblecache_register_class(TSRMLS_D)
 	stumblecache_ce = zend_register_internal_class_ex(&ce_stumblecache, NULL, NULL TSRMLS_CC);
 
 	memcpy(&stumblecache_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+	stumblecache_object_handlers.get_constructor = stumblecache_get_constructor;
+	stumblecache_object_handlers.clone_obj = NULL;
+	
+	stumblecache_ctor_wrapper_func.type = ZEND_INTERNAL_FUNCTION;
+	stumblecache_ctor_wrapper_func.common.function_name = "internal_construction_wrapper";
+	stumblecache_ctor_wrapper_func.common.scope = stumblecache_ce;
+	stumblecache_ctor_wrapper_func.common.fn_flags = ZEND_ACC_PROTECTED;
+	stumblecache_ctor_wrapper_func.common.prototype = NULL;
+	stumblecache_ctor_wrapper_func.common.required_num_args = 0;
+	stumblecache_ctor_wrapper_func.common.arg_info = NULL;
+#if PHP_VERSION_ID < 50399
+	stumblecache_ctor_wrapper_func.pass_rest_by_reference = 0;
+	stumblecache_ctor_wrapper_func.return_reference = 0;
+#endif
+	stumblecache_ctor_wrapper_func.internal_function.handler = stumblecache_constructor_wrapper;
+	stumblecache_ctor_wrapper_func.internal_function.module = EG(current_module);
 }
 
 PHP_METHOD(StumbleCache, __construct)
@@ -470,6 +546,82 @@ PHP_METHOD(StumbleCache, add)
 
 	/* Need to remove the element now */
 	RETURN_FALSE;
+}
+
+PHP_METHOD(StumbleCache, replace)
+{
+	zval *object;
+	php_stumblecache_obj *scache_obj;
+	long  key;
+	zval *value;
+	uint32_t data_idx;
+	zend_error_handling error_handling;
+
+	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Olz", &object, stumblecache_ce, &key, &value) == FAILURE) {
+		return;
+	}
+
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
+
+	if (btree_insert(scache_obj->cache, key, &data_idx)) {
+		size_t   serialized_len;
+		void    *data, *dummy;
+		size_t  *data_size;
+		time_t  *ts;
+		struct igbinary_memory_manager *mm;
+		struct stumblecache_mm_context context;
+
+		/* Add data */
+		btree_get_data_ptr(scache_obj->cache, data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+
+		*ts = time(NULL);
+
+		/* Prepare memory manager for add */
+		context.data = data;
+		context.max_size = scache_obj->cache->header->item_size;
+
+		mm = malloc(sizeof(struct igbinary_memory_manager));
+		mm->alloc = stumblecache_alloc;
+		mm->realloc = stumblecache_realloc;
+		mm->free = stumblecache_free;
+		mm->context = (void*) &context;
+
+		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
+			RETVAL_TRUE;
+		} else {
+			RETVAL_FALSE;
+		}
+		free(mm);
+		btree_data_unlock(scache_obj->cache, data_idx);
+		return;
+	}
+
+	/* Need to remove the element now */
+	RETURN_FALSE;
+}
+
+PHP_METHOD(StumbleCache, exists)
+{
+	zval *object;
+	php_stumblecache_obj *scache_obj;
+	long  key;
+	zend_error_handling error_handling;
+
+	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ol", &object, stumblecache_ce, &key) == FAILURE) {
+		return;
+	}
+
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
+
+	if (btree_delete(scache_obj->cache, key)) {
+		RETURN_TRUE;
+	} else {
+		RETURN_FALSE;
+	}
 }
 
 PHP_METHOD(StumbleCache, remove)
