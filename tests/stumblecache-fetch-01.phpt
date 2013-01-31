@@ -10,8 +10,7 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-add', $options );
-$path = $cache->getPath();
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
 
 var_dump( $cache->add( 50, "some data" ) );
 var_dump( $cache->fetch( 50 ) );
@@ -19,7 +18,10 @@ var_dump( $cache->fetch( 50, 2 ) );
 sleep( 3 );
 var_dump( $cache->fetch( 50, 2 ) );
 
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-add.scache');
 ?>
 --EXPECT--
 bool(true)

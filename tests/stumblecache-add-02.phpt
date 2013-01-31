@@ -10,13 +10,14 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-add', $options );
-$path = $cache->getPath();
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
 
-var_dump( $cache->add( 50, "This text field has quite a little bit too much data. Oh no!" . str_repeat( 'xxxxx', 50 ) ) );
+var_dump( $cache->add( 50, "This text field has quite a little bit too much data. Oh no!" . str_repeat( 'xxxxx', 60 ) ) );
 var_dump( $cache->fetch( 50 ) );
-
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-add.scache');
 ?>
 --EXPECT--
 bool(false)

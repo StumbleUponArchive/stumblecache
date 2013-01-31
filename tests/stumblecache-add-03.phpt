@@ -10,8 +10,7 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-add', $options );
-$path = $cache->getPath();
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
 
 for ( $i = 0; $i < 1025; $i++ )
 {
@@ -34,8 +33,10 @@ for ( $i = 0; $i < 1025; $i++ )
 		echo "Item $i had wrong contents: ", $res, " vs ", sprintf( "ITEM %04X\n", $i ), "\n";
 	}
 }
-
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-add.scache');
 ?>
 --EXPECT--
 Item 1024 could not be added
