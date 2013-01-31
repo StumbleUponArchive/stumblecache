@@ -12,7 +12,8 @@
    | obtain it through the world-wide-web, please send a note to          |
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-   | Authors: Derick Rethans <derick@derickrethans.nl>                    |
+   | Authors: Derick Rethans    <derick@derickrethans.nl>                 |
+   |          Elizabeth M Smith <auroraeosrose@php.net>                   |
    +----------------------------------------------------------------------+
  */
 
@@ -20,51 +21,18 @@
 #include "config.h"
 #endif
 
-#include <stdint.h>
-#include <time.h>
-
 #include "php.h"
-#include "zend.h"
-#include "zend_alloc.h"
-#include "php_globals.h"
 #include "ext/standard/info.h"
+#include "main/php_open_temporary_file.h"
 
+#include "btree/btree.h"
 #include "php_stumblecache.h"
-#include "php_stumblecache_internal.h"
 
 #include "ext/igbinary/igbinary.h"
 
-zend_function_entry stumblecache_functions[] = {
-	{NULL, NULL, NULL}
-};
-
-static const zend_module_dep stumblecache_module_deps[] = {
-	ZEND_MOD_REQUIRED("igbinary")
-	{NULL, NULL, NULL}
-};
-
-zend_module_entry stumblecache_module_entry = {
-#if ZEND_MODULE_API_NO >= 20010901
-	STANDARD_MODULE_HEADER_EX, NULL,
-	stumblecache_module_deps,
-#endif
-	"stumblecache",
-	stumblecache_functions,
-	PHP_MINIT(stumblecache),
-	NULL,
-	NULL,
-	NULL,
-	PHP_MINFO(stumblecache),
-#if ZEND_MODULE_API_NO >= 20010901
-	"0.0.1",
-#endif
-	STANDARD_MODULE_PROPERTIES
-};
-
-
-#ifdef COMPILE_DL_STUMBLECACHE
-ZEND_GET_MODULE(stumblecache)
-#endif
+/* ----------------------------------------------------------------
+	Globals Management
+------------------------------------------------------------------*/
 
 ZEND_DECLARE_MODULE_GLOBALS(stumblecache)
 
@@ -73,15 +41,115 @@ PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("stumblecache.default_ttl", "18000", PHP_INI_ALL, OnUpdateLong, default_ttl, zend_stumblecache_globals, stumblecache_globals)
 PHP_INI_END()
 
- 
-static void stumblecache_init_globals(zend_stumblecache_globals *stumblecache_globals)
+/* {{{ default for cache dir is php temp dir */
+static void stumblecache_init_globals(zend_stumblecache_globals *stumblecache_globals TSRMLS_DC)
 {
-	stumblecache_globals->default_cache_dir = "/tmp";
+#if PHP_VERSION_ID >= 50500 
+	const char* temp_dir = php_get_temporary_directory(TSRMLS_C);
+#else
+	const char* temp_dir = php_get_temporary_directory();
+#endif
+	if (temp_dir && *temp_dir != '\0' && !php_check_open_basedir(temp_dir TSRMLS_CC)) {
+		stumblecache_globals->default_cache_dir = estrdup(temp_dir);
+	} else {
+	       stumblecache_globals->default_cache_dir = "/tmp";
+	}
 }
+/* }}} */
 
-/* Variable declarations */
+/* ----------------------------------------------------------------
+	Extension Definition
+------------------------------------------------------------------*/
+
+/* {{{ stumblecache requires igbinary for serialization */
+static const zend_module_dep stumblecache_module_deps[] = {
+	ZEND_MOD_REQUIRED("igbinary")
+	ZEND_MOD_END
+};
+/* }}} */
+
+/* {{{ stumblecache_module_entry */
+zend_module_entry stumblecache_module_entry = {
+	STANDARD_MODULE_HEADER_EX,
+	NULL,
+	stumblecache_module_deps,
+	"stumblecache",
+	NULL,
+	PHP_MINIT(stumblecache),
+	NULL,
+	NULL,
+	NULL,
+	PHP_MINFO(stumblecache),
+	PHP_STUMBLECACHE_VERSION,
+	STANDARD_MODULE_PROPERTIES
+};
+/* }}} */
+
+#ifdef COMPILE_DL_STUMBLECACHE
+ZEND_GET_MODULE(stumblecache)
+#endif
+
+/* {{{ init our globals and register our class */
+void stumblecache_register_class(TSRMLS_D);
+PHP_MINIT_FUNCTION(stumblecache)
+{
+	ZEND_INIT_MODULE_GLOBALS(stumblecache, stumblecache_init_globals, NULL);
+	REGISTER_INI_ENTRIES();
+
+	stumblecache_register_class(TSRMLS_C);
+
+	return SUCCESS;
+}
+/* }}} */
+
+/* {{{ show version, ini entries and enabled for phpinfo */
+PHP_MINFO_FUNCTION(stumblecache)
+{
+	php_info_print_table_start();
+	php_info_print_table_header(2, "stumblecache support", "enabled");
+	php_info_print_table_header(2, "version", PHP_STUMBLECACHE_VERSION);
+	php_info_print_table_end();
+
+	DISPLAY_INI_ENTRIES();
+}
+/* }}} */
+
+/* ----------------------------------------------------------------
+	StumbleCache Class Definition
+------------------------------------------------------------------*/
+
+/* class points, object handlers, object struct */
+struct _php_stumblecache_obj {
+	zend_object   std;
+	btree_tree   *cache;
+	char         *path;
+};
 zend_class_entry *stumblecache_ce;
 zend_object_handlers stumblecache_object_handlers;
+
+/* memory management struct and helpers */
+struct stumblecache_mm_context {
+	void *data;
+	size_t max_size;
+};
+
+static inline void *stumblecache_alloc(size_t size, void *context)
+{
+	return ((struct stumblecache_mm_context*) context)->data;
+}
+
+static inline void *stumblecache_realloc(void *ptr, size_t newsize, void *context)
+{
+	if (newsize > ((struct stumblecache_mm_context*) context)->max_size) {
+		return NULL;
+	}
+	return ptr;
+}
+
+static inline void stumblecache_free(void *ptr, void *context)
+{
+	return;
+}
 
 /* Forward method declarations */
 PHP_METHOD(StumbleCache, __construct);
@@ -122,7 +190,7 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_fetch, 0, 0, 1)
 ZEND_END_ARG_INFO()
 
 /* StumbleCache methods */
-zend_function_entry stumblecache_funcs[] = {
+zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, __construct,     arginfo_stumblecache_construct, ZEND_ACC_CTOR|ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, getInfo,         arginfo_stumblecache_getinfo,   ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, getPath,         arginfo_stumblecache_getpath,   ZEND_ACC_PUBLIC)
@@ -130,7 +198,7 @@ zend_function_entry stumblecache_funcs[] = {
 	PHP_ME(StumbleCache, add,             arginfo_stumblecache_add,       ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, remove,          arginfo_stumblecache_remove,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
-	{NULL, NULL, NULL}
+	ZEND_FE_END
 };
 
 /* Class helper functions */
@@ -211,7 +279,7 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 			convert_to_long(*dummy);
 			*max_items = Z_LVAL_PP(dummy);
 			if (*max_items < 1 || *max_items > 1024 * 1048576) {
-				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_items should setting be in between 1 and %d, %ld was requested.", 1024 * 1048576, *max_items);
+				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_items should setting be in between 1 and %d, %ld was requested.", 1024 * 1048576, (long int) *max_items);
 				return 0;
 			}
 			set_count++;
@@ -220,7 +288,7 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 			convert_to_long(*dummy);
 			*max_datasize = Z_LVAL_PP(dummy);
 			if (*max_datasize < 1 || *max_datasize > 1048576) {
-				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_datasize setting should be in between 1 and %d, %ld was requested.", 1048576, *max_datasize);
+				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_datasize setting should be in between 1 and %d, %ld was requested.", 1048576, (long int) *max_datasize);
 				return 0;
 			}
 			set_count++;
@@ -269,7 +337,7 @@ void stumblecache_register_class(TSRMLS_D)
 {
 	zend_class_entry ce_stumblecache;
 
-	INIT_CLASS_ENTRY(ce_stumblecache, "StumbleCache", stumblecache_funcs);
+	INIT_CLASS_ENTRY(ce_stumblecache, "StumbleCache", stumblecache_methods);
 	ce_stumblecache.create_object = stumblecache_object_new;
 	stumblecache_ce = zend_register_internal_class_ex(&ce_stumblecache, NULL, NULL TSRMLS_CC);
 
@@ -281,28 +349,30 @@ PHP_METHOD(StumbleCache, __construct)
 	char *cache_id;
 	int   cache_id_len;
 	zval *options = NULL;
+	zend_error_handling error_handling;
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "sa", &cache_id, &cache_id_len, &options) == SUCCESS) {
 		if (!stumblecache_initialize(zend_object_store_get_object(getThis() TSRMLS_CC), cache_id, options TSRMLS_CC)) {
 			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Could not initialize cache.");
 		}
 	}
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 }
 
 PHP_METHOD(StumbleCache, getPath)
 {
 	zval *object;
 	php_stumblecache_obj *scache_obj;
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "O", &object, stumblecache_ce) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	RETURN_STRING(scache_obj->path, 1);
 }
@@ -312,14 +382,15 @@ PHP_METHOD(StumbleCache, getInfo)
 {
 	zval *object;
 	php_stumblecache_obj *scache_obj;
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "O", &object, stumblecache_ce) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	array_init(return_value);
 	add_assoc_long_ex(return_value, "version", sizeof("version"), scache_obj->cache->header->version);
@@ -334,40 +405,17 @@ PHP_METHOD(StumbleCache, dump)
 {
 	zval *object;
 	php_stumblecache_obj *scache_obj;
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "O", &object, stumblecache_ce) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	btree_dump(scache_obj->cache);
-}
-
-
-struct stumblecache_mm_context {
-	void *data;
-	size_t max_size;
-};
-
-static inline void *stumblecache_alloc(size_t size, void *context)
-{
-	return ((struct stumblecache_mm_context*) context)->data;
-}
-
-static inline void *stumblecache_realloc(void *ptr, size_t newsize, void *context)
-{
-	if (newsize > ((struct stumblecache_mm_context*) context)->max_size) {
-		return NULL;
-	}
-	return ptr;
-}
-
-static inline void stumblecache_free(void *ptr, void *context)
-{
-	return;
 }
 
 PHP_METHOD(StumbleCache, add)
@@ -377,14 +425,15 @@ PHP_METHOD(StumbleCache, add)
 	long  key;
 	zval *value;
 	uint32_t data_idx;
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Olz", &object, stumblecache_ce, &key, &value) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	if (btree_insert(scache_obj->cache, key, &data_idx)) {
 		size_t   serialized_len;
@@ -428,14 +477,15 @@ PHP_METHOD(StumbleCache, remove)
 	zval *object;
 	php_stumblecache_obj *scache_obj;
 	long  key;
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ol", &object, stumblecache_ce, &key) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	if (btree_delete(scache_obj->cache, key)) {
 		RETURN_TRUE;
@@ -454,14 +504,15 @@ PHP_METHOD(StumbleCache, fetch)
 	size_t data_size;
 	time_t ts;
 	long   ttl = STUMBLECACHE_G(default_ttl);
+	zend_error_handling error_handling;
 
 	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ol|l", &object, stumblecache_ce, &key, &ttl) == FAILURE) {
 		return;
 	}
 
-	php_set_error_handling(EH_THROW, NULL TSRMLS_CC);
+	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	php_set_error_handling(EH_NORMAL, NULL TSRMLS_CC);
+	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
 	if (btree_search(scache_obj->cache, scache_obj->cache->root, key, &data_idx)) {
 		/* Retrieve data */
@@ -479,24 +530,4 @@ PHP_METHOD(StumbleCache, fetch)
 		}
 	}
 	return; /* Implicit return NULL; */
-}
-
-PHP_MINIT_FUNCTION(stumblecache)
-{
-	ZEND_INIT_MODULE_GLOBALS(stumblecache, stumblecache_init_globals, NULL);
-	REGISTER_INI_ENTRIES();
-
-	stumblecache_register_class(TSRMLS_C);
-
-	return SUCCESS;
-}
-
-
-PHP_MINFO_FUNCTION(stumblecache)
-{
-	php_info_print_table_start();
-	php_info_print_table_header(2, "stumblecache support", "enabled");
-	php_info_print_table_end();
-
-	DISPLAY_INI_ENTRIES();
 }

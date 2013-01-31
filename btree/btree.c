@@ -40,7 +40,7 @@ static void btree_dump_node(btree_tree *t, btree_node *node);
 static btree_node* btree_find_branch(btree_tree *t, btree_node *node, uint64_t key, uint32_t *i);
 static void *btree_get_data_location(btree_tree *t, uint32_t idx);
 
-#define LOCK_DEBUG 1
+#define LOCK_DEBUG 0
 
 /* Locking */
 #define BT_LOCK btree_admin_lock(t)
