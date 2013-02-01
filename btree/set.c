@@ -12,7 +12,8 @@
    | obtain it through the world-wide-web, please send a note to          |
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-   | Authors: Derick Rethans <derick@derickrethans.nl>                    |
+   | Authors: Derick Rethans    <derick@derickrethans.nl>                 |
+   |          Elizabeth M Smith <auroraeosrose@php.net>                   |
    +----------------------------------------------------------------------+
  */
 
@@ -22,7 +23,19 @@
 #include <string.h>
 #include "set.h"
 
-dr_set *dr_set_create(unsigned int size)
+/* ----------------------------------------------------------------
+	Public API
+------------------------------------------------------------------*/
+
+/**
+ * dr_set_create
+ * @param btree struct pointer, caller owns memory
+ * @param path to the file to use, must be absolute
+ * @return int 0 on success or errno on failure
+ *
+ * dr_set or null on failure
+ */
+DRSET_API dr_set *dr_set_create(unsigned int size)
 {
 	dr_set *tmp;
 
@@ -31,35 +44,63 @@ dr_set *dr_set_create(unsigned int size)
 	}
 
 	tmp = calloc(1, sizeof(dr_set));
+	if (tmp == NULL) {
+		return NULL;
+	}
 	tmp->size = size;
 	tmp->setinfo = calloc(1, DR_SET_SIZE(size));
+	if (tmp->setinfo == NULL) {
+		free(tmp);
+		return NULL;
+	}
 
 	dr_set_init(tmp);
 
 	return tmp;
 }
 
-inline void dr_set_init(dr_set *set)
+/**
+ * dr_set_init
+ * @param struct allocated by caller
+ * @return void
+ *
+ * cleans out everything inside the dr_set down to the last byte
+ */
+DRSET_API inline void dr_set_init(dr_set *set)
 {
 	unsigned int i;
 
-	// mass unset everything but the last byte
+	/* mass unset everything but the last byte */
 	memset(set->setinfo, 0xff, set->size / 8);
 
-	// unset bits in the last byte
+	/* unset bits in the last byte */
 	for (i = 0; i < set->size % 8; i++) {
 		dr_set_remove(set, i + (set->size / 8) * 8);
 	}
 }
 
-void dr_set_free(dr_set *set)
+/**
+ *dr_set_free
+ * @param struct allocated by caller
+ * @return void
+ *
+ * frees data for the set
+ */
+DRSET_API void dr_set_free(dr_set *set)
 {
 	free(set->setinfo);
 	free(set);
 }
 
-
-void dr_set_dump(dr_set *set)
+/**
+ * dr_set_dump
+ * @param struct allocated by caller
+ * @return void
+ *
+ * printf output
+ * TODO: allow this to use php_printf or do iterator
+ */
+DRSET_API void dr_set_dump(dr_set *set)
 {
 	unsigned int byte, bit; 
 
@@ -74,9 +115,15 @@ void dr_set_dump(dr_set *set)
 	printf("\n");
 }
 
-
-
-inline void dr_set_add(dr_set *set, unsigned int position)
+/**
+ * dr_set_add
+ * @param struct allocated by caller
+ * @param see if there is something in that position
+ * @return void
+ *
+ * add new position
+ */
+DRSET_API inline void dr_set_add(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -91,7 +138,15 @@ inline void dr_set_add(dr_set *set, unsigned int position)
 	*byte = *byte & ~(1 << bit);
 }
 
-inline void dr_set_remove(dr_set *set, unsigned int position)
+/**
+ * dr_set_remove
+ * @param struct allocated by caller
+ * @param see if there is something in that position
+ * @return void
+ *
+ * cleans out everything in one position
+ */
+DRSET_API inline void dr_set_remove(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -106,8 +161,15 @@ inline void dr_set_remove(dr_set *set, unsigned int position)
 	*byte = *byte | (1 << bit);
 }
 
-
-inline int dr_set_in(dr_set *set, unsigned int position)
+/**
+ * dr_set_in
+ * @param dr_set struct, caller owns
+ * @param see if there is something in that position
+ * @return 1 if found, 0 if not found
+ *
+ * finds first available position in dr_set
+ */
+DRSET_API inline int dr_set_in(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -122,7 +184,15 @@ inline int dr_set_in(dr_set *set, unsigned int position)
 	return (*byte & (1 << bit));
 }
 
-inline int dr_set_find_first(dr_set *set, unsigned int *position)
+/**
+ * dr_set_find_first
+ * @param dr_set struct, caller owns
+ * @param position to be filled in by call
+ * @return 1 if found, 0 if not found
+ *
+ * finds first available position in dr_set
+ */
+DRSET_API inline int dr_set_find_first(dr_set *set, unsigned int *position)
 {
 	unsigned int i, j;
 
