@@ -23,6 +23,11 @@
 #include <string.h>
 #include "set.h"
 
+/* printf statement */
+#ifndef DRSET_PRINT
+#	define DRSET_PRINT(...) { printf(__VA_ARGS__); }
+#endif
+
 /* ----------------------------------------------------------------
 	Public API
 ------------------------------------------------------------------*/
@@ -97,22 +102,21 @@ DRSET_API void dr_set_free(dr_set *set)
  * @param struct allocated by caller
  * @return void
  *
- * printf output
- * TODO: allow this to use php_printf or do iterator
+ * print dump of output
  */
 DRSET_API void dr_set_dump(dr_set *set)
 {
 	unsigned int byte, bit; 
 
-	printf("SIZE: %d\n", set->size);
+	DRSET_PRINT("SIZE: %d\n", set->size);
 	for (byte = 0; byte < ceil((set->size + 7) / 8); byte++) {
-		printf("BYTE: %d (%0x)\n", byte, set->setinfo[byte]);
+		DRSET_PRINT("BYTE: %d (%0x)\n", byte, set->setinfo[byte]);
 		for (bit = 0; bit < 8; bit++) {
-			printf(" %c", set->setinfo[byte] & (1 << bit) ? '1' : '0');
+			DRSET_PRINT(" %c", set->setinfo[byte] & (1 << bit) ? '1' : '0');
 		}
-		printf("\n");
+		DRSET_PRINT("\n");
 	}
-	printf("\n");
+	DRSET_PRINT("\n");
 }
 
 /**
