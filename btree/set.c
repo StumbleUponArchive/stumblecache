@@ -24,7 +24,13 @@
 #include "set.h"
 
 /* printf statement */
-#ifndef DRSET_PRINT
+#ifdef HAVE_STUMBLECACHE
+#	ifdef HAVE_CONFIG_H
+#		include "config.h"
+#	endif
+#	include "php.h"
+#	define DRSET_PRINT(...) { php_printf(__VA_ARGS__); }
+#else
 #	define DRSET_PRINT(...) { printf(__VA_ARGS__); }
 #endif
 
