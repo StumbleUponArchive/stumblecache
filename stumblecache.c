@@ -215,7 +215,6 @@ zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, exists,          arginfo_stumblecache_exists,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, remove,          arginfo_stumblecache_remove,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
-	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -228,7 +227,6 @@ static void stumblecache_object_free_storage(void *object TSRMLS_DC)
 
 	if (intern->cache) {
 		btree_close(intern->cache);
-		btree_free(intern->cache);
 		intern->cache = NULL;
 	}
 
@@ -369,6 +367,7 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 {
 	char *path;
 	uint32_t order, max_items, max_datasize;
+	int error;
 
 	/* Create filepath */
 	if (cache_id[0] != '/') {
@@ -377,14 +376,14 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 		spprintf(&path, 128, "%s.scache", cache_id);
 	}
 
-	obj->cache = btree_open(path);
+	obj->cache = btree_open(path, &error);
 	obj->path  = NULL;
 	if (!obj->cache) {
 		if (!scache_parse_options(options, &order, &max_items, &max_datasize TSRMLS_CC)) {
 			efree(path);
 			return 0;
 		}
-		obj->cache = btree_create(path, order, max_items, max_datasize);
+		obj->cache = btree_create(path, order, max_items, max_datasize, &error);
 		if (!obj->cache) {
 			efree(path);
 			return 0;
@@ -517,6 +516,7 @@ PHP_METHOD(StumbleCache, getInfo)
 */
 PHP_METHOD(StumbleCache, dump)
 {
+	int error = 0;
 	php_stumblecache_obj *scache_obj;
 
 	if (FAILURE == zend_parse_parameters_none()) {
@@ -525,7 +525,10 @@ PHP_METHOD(StumbleCache, dump)
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
 
-	btree_dump(scache_obj->cache);
+	error = btree_dump(scache_obj->cache);
+	if (error) {
+		php_printf("we can haz error %d", error);
+	}
 }
 /* }}} */
 
@@ -542,7 +545,7 @@ PHP_METHOD(StumbleCache, add)
 	zval *value;
 	uint32_t data_idx;
 
-	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "lz", &key, &value) == FAILURE) {
+	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &key, &value)) {
 		return;
 	}
 
@@ -672,22 +675,22 @@ PHP_METHOD(StumbleCache, exists)
 */
 PHP_METHOD(StumbleCache, remove)
 {
-	zval *object;
-	php_stumblecache_obj *scache_obj;
 	long  key;
-	zend_error_handling error_handling;
+	int error = 0;
+	php_stumblecache_obj *scache_obj;
 
-	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ol", &object, stumblecache_ce, &key) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &key) == FAILURE) {
 		return;
 	}
 
-	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
-	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	zend_restore_error_handling(&error_handling TSRMLS_CC);
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
 
-	if (btree_delete(scache_obj->cache, key)) {
+	error = btree_delete(scache_obj->cache, key);
+	if (error == 0) {
 		RETURN_TRUE;
 	} else {
+		// TODO: save error information here 
+		// method, file, line, errno - string translation?
 		RETURN_FALSE;
 	}
 }

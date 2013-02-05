@@ -25,10 +25,10 @@ typedef struct _dr_set {
 } dr_set;
 
 #if defined(__GNUC__) && __GNUC__ >= 4
-#       define DRSET_API __attribute__ ((visibility("default")))
-#   else
-#       define DRSET_API
-#   endif
+#	define DRSET_API __attribute__ ((visibility("default")))
+#else
+#	define DRSET_API
+#endif
 
 DRSET_API dr_set *dr_set_create(unsigned int size);
 DRSET_API void dr_set_init(dr_set *set);
