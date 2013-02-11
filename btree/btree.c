@@ -49,16 +49,25 @@
 /* Forward declarations */
 static btree_node* btree_find_branch(btree_tree *t, btree_node *node, uint64_t key, uint32_t *i);
 static void *btree_get_data_location(btree_tree *t, uint32_t idx);
+static int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx);
 
-#define LOCK_DEBUG 0
+/* ----------------------------------------------------------------
+	Lock APIS
+------------------------------------------------------------------*/
 
-/* Locking */
-#define BT_LOCK btree_admin_lock(t)
-#define BT_UNLOCK btree_admin_unlock(t)
-#define BT_LOCK_DATA_R(idx) btree_data_lockr(t, (idx))
-#define BT_LOCK_DATA_W(idx) btree_data_lockw(t, (idx))
-#define BT_UNLOCK_DATA(idx) btree_data_unlock(t, (idx))
+#ifndef LOCK_DEBUG
+#	define LOCK_DEBUG 0
+#endif
 
+/**
+ * btree_admin_lock
+ * @access private
+ * @param btree to lock
+ * @return int 0 on success or errno on failure
+ *
+ * Uses fcntl write lock on portion of mmaped file that is the header
+ * location
+ */
 static int btree_admin_lock(btree_tree *t)
 {
 	struct flock fls;
@@ -78,6 +87,43 @@ static int btree_admin_lock(btree_tree *t)
 	return 0;
 }
 
+/**
+ * btree_admin_lockr
+ * @access private
+ * @param btree to lock
+ * @return int 0 on success or errno on failure
+ *
+ * Uses fcntl read lock on portion of mmaped file that is the header
+ * location
+ */
+static int btree_admin_lockr(btree_tree *t)
+{
+	struct flock fls;
+
+	fls.l_type   = F_RDLCK;
+	fls.l_whence = SEEK_SET;
+	fls.l_start  = 0;
+	fls.l_len    = t->data - t->mmap;
+
+#if LOCK_DEBUG
+	printf("LOCKW   %4x - %4x\n", (unsigned int) fls.l_start, (unsigned int) fls.l_len);
+#endif
+
+	if (fcntl(t->fd, F_SETLKW, &fls) == -1) {
+		return errno;
+	}
+	return 0;
+}
+
+/**
+ * btree_admin_unlock
+ * @access private
+ * @param btree to unlock
+ * @return int 0 on success or errno on failure
+ *
+ * releases all locks on portion of mmaped file that is the header
+ * location
+ */
 static int btree_admin_unlock(btree_tree *t)
 {
 	struct flock fls;
@@ -103,6 +149,16 @@ static int btree_admin_unlock(btree_tree *t)
 	return 0;
 }
 
+/**
+ * btree_data_lock_helper
+ * @access private
+ * @param btree to deal with
+ * @param data index location
+ * @param type of lock to perform
+ * @return int 0 on success or errno on failure
+ *
+ * helper for locking and unlocking data locations
+ */
 inline static int btree_data_lock_helper(btree_tree *t, uint32_t idx, short type)
 {
 	struct flock fls;
@@ -120,25 +176,52 @@ inline static int btree_data_lock_helper(btree_tree *t, uint32_t idx, short type
 #if LOCK_DEBUG
 		printf(" X: %d\n", errno);
 #endif
-		return 0;
+		return errno;
 	}
 #if LOCK_DEBUG
 	printf(" V\n");
 #endif
-	return 1;
+	return 0;
 }
 
+/**
+ * btree_data_lockr
+ * @access private
+ * @param btree to deal with
+ * @param data index location
+ * @return int 0 on success or errno on failure
+ *
+ * lock data for reading
+ */
 static int btree_data_lockr(btree_tree *t, uint32_t idx)
 {
 	return btree_data_lock_helper(t, idx, F_RDLCK);
 }
 
+/**
+ * btree_data_lockw
+ * @access private
+ * @param btree to deal with
+ * @param data index location
+ * @return int 0 on success or errno on failure
+ *
+ * lock data for writing
+ */
 static int btree_data_lockw(btree_tree *t, uint32_t idx)
 {
 	return btree_data_lock_helper(t, idx, F_WRLCK);
 }
 
-int btree_data_unlock(btree_tree *t, uint32_t idx)
+/**
+ * btree_data_unlock
+ * @access private
+ * @param btree to deal with
+ * @param data index location
+ * @return int 0 on success or errno on failure
+ *
+ * unlock data index location
+ */
+BTREE_API int btree_data_unlock(btree_tree *t, uint32_t idx)
 {
 	return btree_data_lock_helper(t, idx, F_UNLCK);
 }
@@ -149,6 +232,7 @@ int btree_data_unlock(btree_tree *t, uint32_t idx)
 
 /**
  * btree_allocate
+ * @access private
  * @param path to the file to use, must be absolute
  * @param order maximum number of pointers that can be stored in a node with a limit of BTREE_MAX_ORDER
  * @param maximum total number of items allowed
@@ -204,6 +288,7 @@ static int btree_allocate(const char *path, uint32_t order, uint32_t nr_of_items
 
 /**
  * btree_allocate_node
+ * @access private
  * @param btree struct pointer, caller owns memory
  * @return new btree node
  *
@@ -225,6 +310,7 @@ static btree_node *btree_allocate_node(btree_tree *t)
 
 /**
  * btree_get_node
+ * @access private
  * @param btree struct pointer
  * @param index of node to return
  * @return btree node requested at index
@@ -238,6 +324,7 @@ inline static btree_node *btree_get_node(btree_tree *t, uint32_t idx)
 
 /**
  * btree_get_data_location
+ * @access private
  * @param btree struct pointer
  * @param index of node to return
  * @return pointer to a data memory location
@@ -476,48 +563,138 @@ BTREE_API int btree_close(btree_tree *t)
 	Data APIs
 ------------------------------------------------------------------*/
 
-void *btree_get_data(btree_tree *t, uint32_t idx, size_t *data_size, time_t *ts)
+/**
+ * btree_get_data
+ * @access public
+ * @param btree struct
+ * @param key for data
+ * @param index of data - out
+ * @param pointer to data - out
+ * @param data size - out
+ * @param time - out
+ * @return int 0 on success or error value
+ *
+ * Gets data from location in btree - does a READ lock on the data
+ * User needs to call btree_unlock_data when finished
+ */
+BTREE_API int btree_get_data(btree_tree *t, uint64_t key, uint32_t *idx, void **data, size_t **data_size, time_t **ts)
 {
 	void *location;
+	int error;
 
-	location = btree_get_data_location(t, idx);
-	*data_size = *((size_t*)location);
-	*ts = *((time_t*) (location + sizeof(size_t)));
-	return location + sizeof(size_t) + sizeof(time_t);
-}
-
-int btree_set_data(btree_tree *t, uint32_t idx, void *data, size_t data_size, time_t ts)
-{
-	void *location;
-
-	if (data_size > t->header->item_size) {
-		return 0;
+	if (1 == btree_search_internal(t, t->root, key, idx)) {
+		error = btree_data_lockr(t, *idx);
+		if (error != 0) {
+			return error;
+		}
+	} else {
+		return 404; /* Data not found */
 	}
 
-	BT_LOCK;
-	location = btree_get_data_location(t, idx);
+	location = btree_get_data_location(t, *idx);
+	*data_size = ((size_t*)location);
+	*ts = (time_t*) (location + sizeof(size_t));
+	*data = location + sizeof(size_t) + sizeof(time_t);
+
+	return 0;
+}
+
+/**
+ * btree_get_data_ptr
+ * @access public
+ * @param btree struct
+ * @param key for data
+ * @param index of data - out
+ * @param pointer to data - out
+ * @param data size - out
+ * @param time - out
+ * @return int 0 on success or error value
+ *
+ * Gets data from location in btree - does a WRITE lock on the data
+ * User needs to call btree_unlock_data when finished
+ */
+BTREE_API int btree_get_data_ptr(btree_tree *t, uint64_t key, uint32_t *idx, void **data, size_t **data_size, time_t **ts)
+{
+	void *location;
+	int error;
+
+	if (1 == btree_search_internal(t, t->root, key, idx)) {
+		error = btree_data_lockw(t, *idx);
+		if (error != 0) {
+			return error;
+		}
+	} else {
+		return 404; /* Data not found */
+	}
+
+	location = btree_get_data_location(t, *idx);
+	*data_size = ((size_t*)location);
+	*ts = (time_t*) (location + sizeof(size_t));
+	*data = location + sizeof(size_t) + sizeof(time_t);
+
+	return 0;
+}
+
+/**
+ * btree_set_data
+ * @access public
+ * @param btree struct
+ * @param key
+ * @param pointer to data
+ * @param data size
+ * @param time
+ * @return int 0 on success or error value
+ *
+ * Writes data to a location in a btree, handles all it's own locking
+ */
+BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t data_size, time_t ts)
+{
+	void *location;
+	int error;
+	uint32_t *idx;
+
+	if (data_size > t->header->item_size) {
+		return 413; /* Request Entity Too Large - data > item_size */
+	}
+
+	if (1 == btree_search_internal(t, t->root, key, idx)) {
+		error = btree_data_lockw(t, *idx);
+		if (error != 0) {
+			return error;
+		}
+	} else {
+		return 404; /* Data not found */
+	}
+
+	location = btree_get_data_location(t, *idx);
 	*((size_t*)location) = data_size;
 	*(time_t*) (location + sizeof(size_t)) = ts;
 	memcpy(location + sizeof(size_t) + sizeof(time_t), data, data_size);
-	BT_UNLOCK;
-	return 1;
-}
 
-void btree_get_data_ptr(btree_tree *t, uint32_t idx, void **data, size_t **data_size, time_t **ts)
-{
-	void *location;
-
-	location = btree_get_data_location(t, idx);
-	*data = location + sizeof(size_t) + sizeof(time_t);
-	*data_size = ((size_t*)location);
-	*ts = (time_t*) (location + sizeof(size_t));
+	error = btree_data_unlock(t, *idx);
+	if (error != 0) {
+		return error;
+	}
+	return 0;
 }
 
 /* ----------------------------------------------------------------
 	Search APIs
 ------------------------------------------------------------------*/
 
-int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx)
+/**
+ * btree_search_internal
+ * @access private
+ * @param btree struct
+ * @param btree node
+ * @param key
+ * @param index to fill
+ * @return 1 if found, 0 if not
+ *
+ * does the actual search of the tree to find an index location
+ * can be called recursively as the nodes are walked
+ */
+static int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx)
 {
 	int i = 0;
 	while (i < node->nr_of_keys && key > node->keys[i].key) {
@@ -539,23 +716,55 @@ int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, uint32_
 	}
 }
 
-/* This function will lock the data index for writing FIXME: Should use R for normal finds */
-int btree_search(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx)
+/**
+ * btree_search
+ * @access public
+ * @param btree struct
+ * @param btree node
+ * @param key
+ * @param index
+ * @return 0 on success, error code on failure
+ *
+ * tries to find a key in the node in the tree - and fills the index if successful
+ * locks for reading, does NOT lock location
+ */
+BTREE_API int btree_search(btree_tree *t, btree_node *node, uint64_t key)
 {
-	int retval;
+	int found, error = 0;
+	uint32_t *idx;
 
-	BT_LOCK;
-	if (1 == (retval = btree_search_internal(t, node, key, idx))) {
-		BT_LOCK_DATA_R(*idx);
+	error = btree_admin_lockr(t);
+	if (error != 0) {
+		return error;
 	}
-	BT_UNLOCK;
-	return retval;
+
+	found = btree_search_internal(t, node, key, idx);
+
+	error = btree_admin_unlock(t);
+	if (error != 0) {
+		return error;
+	}
+	if (1 == found) {
+		return 0;
+	}
+	return error;
 }
 
 /* ----------------------------------------------------------------
 	Node APIs
 ------------------------------------------------------------------*/
 
+/**
+ * btree_split_child
+ * @access private
+ * @param btree struct
+ * @param btree node
+ * @param key
+ * @param btree child node
+ * @return void
+ *
+ * splits a node into two
+ */
 static void btree_split_child(btree_tree *t, btree_node *parent, uint32_t key_nr, btree_node *child)
 {
 	uint32_t j;
@@ -584,13 +793,19 @@ static void btree_split_child(btree_tree *t, btree_node *parent, uint32_t key_nr
 	}
 	parent->keys[key_nr] = child->keys[BTREE_T(t) - 1];
 	parent->nr_of_keys++;
-/*
-	for (j = BTREE_T(t) - 1; j < child->nr_of_keys; j++) {
-		child->keys[j].key = 0;
-	}
-*/
 }
 
+/**
+ * btree_find_branch
+ * @access private
+ * @param btree struct
+ * @param btree node
+ * @param key
+ * @param i
+ * @return void
+ *
+ * finds the branch for the node and calls btree_get_node 
+ */
 static btree_node* btree_find_branch(btree_tree *t, btree_node *node, uint64_t key, uint32_t *i)
 {
 	*i = node->nr_of_keys;
@@ -600,6 +815,18 @@ static btree_node* btree_find_branch(btree_tree *t, btree_node *node, uint64_t k
 	return btree_get_node(t, node->branch[*i]);
 }
 
+/**
+ * btree_insert_non_full
+ * @access private
+ * @param btree struct
+ * @param btree node
+ * @param key
+ * @param data index
+ * @return void
+ *
+ * inserts the node into the btree - either immediately if it's a leaf or find the branch, split
+ * the child and call this recursively until a leaf is found
+ */
 static void btree_insert_non_full(btree_tree *t, btree_node *node, uint64_t key, uint32_t data_idx)
 {
 	uint32_t i;
@@ -632,6 +859,17 @@ static void btree_insert_non_full(btree_tree *t, btree_node *node, uint64_t key,
 	}
 }
 
+/**
+ * btree_insert_internal
+ * @access private
+ * @param btree struct
+ * @param key
+ * @param data index
+ * @return void
+ *
+ * does the actual insert of the new node - depending on which side of the tree
+ * it needs to go on this can include a split, or just a call to insert_non_full
+ */
 static void btree_insert_internal(btree_tree *t, uint64_t key, uint32_t data_idx)
 {
 	btree_node *r = t->root;
@@ -652,6 +890,17 @@ static void btree_insert_internal(btree_tree *t, uint64_t key, uint32_t data_idx
 	}
 }
 
+/**
+ * btree_node_insert_key
+ * @access private
+ * @param btree struct
+ * @param btree node
+ * @param pos
+ * @param key
+ * @return void
+ *
+ * puts a new key into a node and moves other keys if necessary
+ */
 static void btree_node_insert_key(btree_tree *t, btree_node *node, uint32_t pos, btree_key key)
 {
 	uint32_t i = node->nr_of_keys;
@@ -665,36 +914,54 @@ static void btree_node_insert_key(btree_tree *t, btree_node *node, uint32_t pos,
 }
 
 /**
- * btree_delete
+ * btree_insert
  * @access public
  * @param btree struct
+ * @param insertion key
+ * @param pointer to data index
  * @return int 0 on success or error value
  *
  * Inserts data as key in tree IF it doesn't already exist
  */
-BTREE_API int btree_insert(btree_tree *t, uint64_t key, uint32_t *data_idx)
+BTREE_API int btree_insert(btree_tree *t, uint64_t key)
 {
 	btree_node *r = t->root;
 	unsigned int tmp_data_idx;
+	int error = 0;
 
-	BT_LOCK;
+	error = btree_admin_lock(t);
+	if (error != 0) {
+		return error;
+	}
+
 	if (t->header->item_count >= t->header->max_items) {
-		BT_UNLOCK;
-		return 0;
+		error = btree_admin_unlock(t);
+		if (error != 0) {
+			return error;
+		}
+		return 413; /* Request Entity Too Large - item count > max items allowed */
 	}
 	if (btree_search_internal(t, r, key, NULL)) {
-		BT_UNLOCK;
-		return 0;
+		error = btree_admin_unlock(t);
+		if (error != 0) {
+			return error;
+		}
+		return 409; /* Conflict - item already exists */
 	}
 	if (!dr_set_find_first(&(t->freelist), &tmp_data_idx)) {
-		BT_UNLOCK;
-		return 0;
+		error = btree_admin_unlock(t);
+		if (error != 0) {
+			return error;
+		}
+		return 500; /* Woah, btree error, couldn't retrieve that node! */
 	}
 	btree_insert_internal(t, key, tmp_data_idx);
-	*data_idx = tmp_data_idx;
-	BT_LOCK_DATA_W(tmp_data_idx);
-	BT_UNLOCK;
-	return 1;
+
+	error = btree_admin_unlock(t);
+	if (error != 0) {
+		return error;
+	}
+	return 0;
 }
 
 /**
@@ -829,7 +1096,6 @@ static void btree_merge(btree_tree *t, btree_node *a, btree_node *x, uint32_t id
 		}
 	}
 }
-
 
 /**
  * btree_delete_internal

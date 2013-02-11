@@ -125,6 +125,10 @@ struct _php_stumblecache_obj {
 	zend_object   std;
 	btree_tree   *cache;
 	char         *path;
+	char	     *error_method;
+        int           error_line;
+        char         *error_file;
+        int           error_code;
 	zend_bool     is_constructed;
 };
 static zend_class_entry *stumblecache_ce;
@@ -225,6 +229,8 @@ static void stumblecache_object_free_storage(void *object TSRMLS_DC)
 {
 	php_stumblecache_obj *intern = (php_stumblecache_obj *) object;
 
+	intern->is_constructed = 0;
+
 	if (intern->cache) {
 		btree_close(intern->cache);
 		intern->cache = NULL;
@@ -233,6 +239,12 @@ static void stumblecache_object_free_storage(void *object TSRMLS_DC)
 	if (intern->path) {
 		efree(intern->path);
 		intern->path = NULL;
+	}
+	if (intern->error_file) {
+		efree(intern->error_file);
+	}
+	if (intern->error_method) {
+		efree(intern->error_method);
 	}
 
 	zend_object_std_dtor(&intern->std TSRMLS_CC);
@@ -390,6 +402,10 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 		}
 	}
 	obj->path = path;
+	obj->error_code = 0;
+	obj->error_line = 0;
+	obj->error_file = NULL;
+	obj->error_method = NULL;
 	obj->is_constructed = 1;
 	return 1;
 }
@@ -423,6 +439,22 @@ void stumblecache_register_class(TSRMLS_D)
 	stumblecache_ctor_wrapper_func.internal_function.module = EG(current_module);
 }
 /* }}} */
+
+/* {{{ helper to save error information */
+void stumblecache_save_error(php_stumblecache_obj *scache_obj, const char * method, int code TSRMLS_DC)
+{
+	if (scache_obj->error_file) {
+		efree(scache_obj->error_file);
+	}
+	if (scache_obj->error_method) {
+		efree(scache_obj->error_method);
+	}
+
+	scache_obj->error_line = zend_get_executed_lineno(TSRMLS_C);
+	scache_obj->error_file = estrdup(zend_get_executed_filename(TSRMLS_C));
+	scache_obj->error_method = estrdup(method);
+	scache_obj->error_code = code;
+}
 
 /* ----------------------------------------------------------------
 	StumbleCache Public API
@@ -510,9 +542,10 @@ PHP_METHOD(StumbleCache, getInfo)
 }
 /* }}} */
 
-/* {{{ proto array StumbleCache->dump(void)
+/* {{{ proto bool StumbleCache->dump(void)
 	outputs a dump (via php_printf) of the current
         contents of the opened cache
+TODO: add different output formats for dump
 */
 PHP_METHOD(StumbleCache, dump)
 {
@@ -527,23 +560,22 @@ PHP_METHOD(StumbleCache, dump)
 
 	error = btree_dump(scache_obj->cache);
 	if (error) {
-		php_printf("we can haz error %d", error);
+		stumblecache_save_error(scache_obj, "dump", error TSRMLS_CC);
+		RETURN_FALSE;
 	}
+	RETURN_TRUE;
 }
 /* }}} */
 
 /* {{{ proto bool StumbleCache->add(integer key, mixed value)
 	adds an item to the btree, if the item already exists
         then no add takes place
-
-	TODO: error handling mechanism and fix locking so library encapsulates usage
 */
 PHP_METHOD(StumbleCache, add)
 {
 	php_stumblecache_obj *scache_obj;
 	long  key;
 	zval *value;
-	uint32_t data_idx;
 
 	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &key, &value)) {
 		return;
@@ -551,37 +583,44 @@ PHP_METHOD(StumbleCache, add)
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
 
-	if (btree_insert(scache_obj->cache, key, &data_idx)) {
+	if (0 == btree_insert(scache_obj->cache, key)) {
 		size_t   serialized_len;
+		uint32_t data_idx;
 		void    *data, *dummy;
 		size_t  *data_size;
 		time_t  *ts;
+		int error;
 		struct igbinary_memory_manager *mm;
 		struct stumblecache_mm_context context;
 
-		/* Add data */
-		btree_get_data_ptr(scache_obj->cache, data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
-
-		*ts = time(NULL);
-
-		/* Prepare memory manager for add */
-		context.data = data;
-		context.max_size = scache_obj->cache->header->item_size;
-
-		mm = malloc(sizeof(struct igbinary_memory_manager));
-		mm->alloc = stumblecache_alloc;
-		mm->realloc = stumblecache_realloc;
-		mm->free = stumblecache_free;
-		mm->context = (void*) &context;
-
-		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
-			RETVAL_TRUE;
+		error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+		/* Try to get our ptr */
+		if (0 != error) {
+			stumblecache_save_error(scache_obj, "add", error TSRMLS_CC);
+			RETURN_FALSE;
 		} else {
-			RETVAL_FALSE;
+
+			*ts = time(NULL);
+
+			/* Prepare memory manager for add */
+			context.data = data;
+			context.max_size = scache_obj->cache->header->item_size;
+
+			mm = malloc(sizeof(struct igbinary_memory_manager));
+			mm->alloc = stumblecache_alloc;
+			mm->realloc = stumblecache_realloc;
+			mm->free = stumblecache_free;
+			mm->context = (void*) &context;
+
+			if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
+				RETVAL_TRUE;
+			} else {
+				RETVAL_FALSE;
+			}
+			free(mm);
+			btree_data_unlock(scache_obj->cache, data_idx);
+			return;
 		}
-		free(mm);
-		btree_data_unlock(scache_obj->cache, data_idx);
-		return;
 	}
 
 	RETURN_FALSE;
@@ -596,73 +635,30 @@ PHP_METHOD(StumbleCache, add)
 */
 PHP_METHOD(StumbleCache, replace)
 {
-	php_stumblecache_obj *scache_obj;
-	long  key;
-	zval *value;
-	uint32_t data_idx;
-
-	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "lz", &key, &value) == FAILURE) {
-		return;
-	}
-
-	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
-
-	if (btree_insert(scache_obj->cache, key, &data_idx)) {
-		size_t   serialized_len;
-		void    *data, *dummy;
-		size_t  *data_size;
-		time_t  *ts;
-		struct igbinary_memory_manager *mm;
-		struct stumblecache_mm_context context;
-
-		/* Add data */
-		btree_get_data_ptr(scache_obj->cache, data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
-
-		*ts = time(NULL);
-
-		/* Prepare memory manager for add */
-		context.data = data;
-		context.max_size = scache_obj->cache->header->item_size;
-
-		mm = malloc(sizeof(struct igbinary_memory_manager));
-		mm->alloc = stumblecache_alloc;
-		mm->realloc = stumblecache_realloc;
-		mm->free = stumblecache_free;
-		mm->context = (void*) &context;
-
-		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
-			RETVAL_TRUE;
-		} else {
-			RETVAL_FALSE;
-		}
-		free(mm);
-		btree_data_unlock(scache_obj->cache, data_idx);
-		return;
-	}
-
-	RETURN_FALSE;
+	//TODO: make this do something
 }
 /* }}} */
 
 /* {{{ proto bool StumbleCache->exists(integer key)
 	checks to see if an item exists in the cache
-
-	TODO: make this do something
 */
 PHP_METHOD(StumbleCache, exists)
 {
 	php_stumblecache_obj *scache_obj;
 	long  key;
+	int error;
 
-	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "l", &key) == FAILURE) {
+	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &key) == FAILURE) {
 		return;
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	error = btree_search(scache_obj->cache, scache_obj->cache->root, key);
 
-	if (1) {
+	if (0 == error) {
 		RETURN_TRUE;
 	} else {
+		stumblecache_save_error(scache_obj, "exists", error TSRMLS_CC);
 		RETURN_FALSE;
 	}
 }
@@ -670,13 +666,12 @@ PHP_METHOD(StumbleCache, exists)
 
 /* {{{ proto bool StumbleCache->remove(integer key)
 	removes an item from the cache
-
-	TODO: error handling mechanism and fix locking so library encapsulates usage
 */
 PHP_METHOD(StumbleCache, remove)
 {
 	long  key;
 	int error = 0;
+	uint32_t data_idx;
 	php_stumblecache_obj *scache_obj;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &key) == FAILURE) {
@@ -689,8 +684,7 @@ PHP_METHOD(StumbleCache, remove)
 	if (error == 0) {
 		RETURN_TRUE;
 	} else {
-		// TODO: save error information here 
-		// method, file, line, errno - string translation?
+		stumblecache_save_error(scache_obj, "remove", error TSRMLS_CC);
 		RETURN_FALSE;
 	}
 }
@@ -698,43 +692,41 @@ PHP_METHOD(StumbleCache, remove)
 
 /* {{{ proto mixed StumbleCache->fetch(integer key)
 	fetch's data from the cache
-
-	TODO: error handling mechanism and fix locking so library encapsulates usage
 */
 PHP_METHOD(StumbleCache, fetch)
 {
-	zval *object;
 	php_stumblecache_obj *scache_obj;
 	long  key;
 	uint32_t data_idx;
 	void    *data;
-	size_t data_size;
-	time_t ts;
+	size_t *data_size;
+	time_t *ts;
+	int error;
 	long   ttl = STUMBLECACHE_G(default_ttl);
-	zend_error_handling error_handling;
 
-	if (zend_parse_method_parameters(ZEND_NUM_ARGS() TSRMLS_CC, getThis(), "Ol|l", &object, stumblecache_ce, &key, &ttl) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l|l", &key, &ttl) == FAILURE) {
 		return;
 	}
 
-	zend_replace_error_handling(EH_THROW, NULL, &error_handling TSRMLS_CC);
-	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(object TSRMLS_CC);
-	zend_restore_error_handling(&error_handling TSRMLS_CC);
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
 
-	if (btree_search(scache_obj->cache, scache_obj->cache->root, key, &data_idx)) {
-		/* Retrieve data */
-		data = btree_get_data(scache_obj->cache, data_idx, &data_size, &ts);
+	error = btree_get_data(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+
+	if (0 == error) {
+		/* unlock, we're good */
 		btree_data_unlock(scache_obj->cache, data_idx);
 
 		/* Check whether the data is fresh */
-		if (time(NULL) < ts + ttl) {
-			if (data_size) {
-				igbinary_unserialize((uint8_t *) data, data_size, &return_value TSRMLS_CC);
+		if (time(NULL) < *ts + ttl) {
+			if (*data_size) {
+				igbinary_unserialize((uint8_t *) data, *data_size, &return_value TSRMLS_CC);
 				return;
 			}
 		} else {
 			btree_delete(scache_obj->cache, key);
 		}
+	} else {
+		stumblecache_save_error(scache_obj, "fetch", error TSRMLS_CC);	
 	}
 	return; /* Implicit return NULL; */
 }
@@ -742,12 +734,16 @@ PHP_METHOD(StumbleCache, fetch)
 
 /* {{{ proto array StumbleCache->getLastError(void)
 	returns array of error informaion from the last method reporting errors
-	array('method' => string name of method,
-		'error' => integer error code,
-		'message' => string message of error code)
+	array('code' => error code,
+	      'message' => error message,
+		'file' => file where it occured,
+		'line' => line where it occured,
+		'method' => method of class that did it)
 */
 PHP_METHOD(StumbleCache, getLastError)
 {
+	int code;
+	char *buf;
 	php_stumblecache_obj *scache_obj;
 
 	if (zend_parse_parameters_none() == FAILURE) {
@@ -755,5 +751,22 @@ PHP_METHOD(StumbleCache, getLastError)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+
+	array_init(return_value);
+
+	code = scache_obj->error_code;
+	add_assoc_long(return_value, "code", code);
+	/* todo - take care of error codes that are not errno ones! */
+	if (0 != code) {
+		buf = emalloc(1024);
+		strerror_r(code, buf, 1024);
+		add_assoc_string(return_value, "message", buf, 1);
+		efree(buf);
+	} else {
+		add_assoc_string(return_value, "message", "No Error", 1);
+	}
+	add_assoc_string(return_value, "file", scache_obj->error_file, 1);
+	add_assoc_long(return_value, "line", scache_obj->error_line);
+	add_assoc_string(return_value, "method", scache_obj->error_method, 1);
 }
 /* }}} */
