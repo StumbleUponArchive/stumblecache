@@ -11,11 +11,20 @@ all: ${BINS}
 test:
 	./tree-create
 	./tree-create2 loremipsum.txt
-	#./tree-search
-	#./tree-search2
-	#./tree-search3 P
+	./tree-search
+	./tree-search2 loremipsum.txt
+	./tree-search3 49
 	./tree-create-failures
 	./tree-create-failures2
+	./tree-delete
+	./tree-delete2
+	./tree-delete3
+	./tree-delete4
+	./tree-delete5
+	./tree-delete6
+	./set1
+	./set2
+	./set3
 
 	rm test.mmap
 	rm tree2.mmap

@@ -27,21 +27,30 @@ int main(int argc, char *argv[])
 	uint64_t id;
 	uint64_t found = 0;
 	uint32_t idx;
-	size_t data_size;
-	time_t ts;
+	size_t *data_size;
+	time_t *ts;
+	int error;
 
-	tmp = btree_open("test.mmap");
+	tmp = btree_open("test.mmap", &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't open tree, errno %d.\n", error);
 		exit(1);
 	}
 
+	if (argc < 2) {
+		printf("Please pass an id to find in the btree\n");
+		exit(1);	
+	}
+
 	id = atoll(argv[1]);
-	found += btree_search(tmp, tmp->root, id, &idx);
-	data = (char*) btree_get_data(tmp, idx, &data_size, &ts);
+	if(0 == btree_search(tmp, tmp->root, id)) {
+		found = 1;
+	}
+
+	error = btree_get_data(tmp, id, &idx, (void **) &data, &data_size, &ts);
 	printf("Found: %lu (%u)\n%s\n", found, idx, data);
 
-	btree_free(tmp);
+	btree_close(tmp);
 
 	return 0;
 }

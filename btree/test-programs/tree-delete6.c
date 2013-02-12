@@ -24,22 +24,21 @@
 
 void setup(btree_tree *tmp)
 {
-	uint32_t data_idx;
 	int i;
 
 	for (i = 0; i < 80; i++) {
-		btree_insert(tmp, i, &data_idx);
+		btree_insert(tmp, i);
 	}
 }
 
 int main(void)
 {
 	btree_tree *tmp;
-	int i;
+	int i, error = 0;
 
-	tmp = btree_create("test.mmap", 5, 64, 32);
+	tmp = btree_create("test.mmap", 5, 64, 32, &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't create tree from disk image error %d.\n", error);
 		exit(1);
 	}
 
@@ -51,8 +50,7 @@ int main(void)
 	btree_delete(tmp, 31);
 	btree_dump(tmp);
 
-	btree_free(tmp);
-	unlink("test.mmap");
+	btree_close(tmp);
 
 	return 0;
 }

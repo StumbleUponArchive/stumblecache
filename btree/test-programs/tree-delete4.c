@@ -21,25 +21,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+static uint32_t insert_item(btree_tree *tmp, uint64_t index) {
+	uint32_t data_idx;
+	size_t *size;
+	time_t *time;
+	void *data;
+
+	btree_insert(tmp, index);
+	btree_get_data(tmp, index, &data_idx, &data, &size, &time);
+	printf("%u\n", data_idx);
+	btree_data_unlock(tmp, data_idx);
+	return data_idx;
+}
+
 void setup(btree_tree *tmp)
 {
-	uint32_t data_idx;
-
 	/* Testing with full root node */
-	btree_insert(tmp, 'F', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'Q', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'Z', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'E', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'A', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'B', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'P', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'G', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'R', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'Y', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'H', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'C', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'D', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'S', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'F');
+	insert_item(tmp, 'Q');
+	insert_item(tmp, 'Z');
+	insert_item(tmp, 'E');
+	insert_item(tmp, 'A');
+	insert_item(tmp, 'B');
+	insert_item(tmp, 'P');
+	insert_item(tmp, 'G');
+	insert_item(tmp, 'R');
+	insert_item(tmp, 'Y');
+	insert_item(tmp, 'H');
+	insert_item(tmp, 'C');
+	insert_item(tmp, 'D');
+	insert_item(tmp, 'S');
 	btree_dump(tmp);
 
 	btree_delete(tmp, 'H');
@@ -64,11 +75,11 @@ void setup(btree_tree *tmp)
 int main(void)
 {
 	btree_tree *tmp;
-	uint32_t data_idx;
+	int error = 0;
 
-	tmp = btree_create("test.mmap", 3, 400, 1024);
+	tmp = btree_create("test.mmap", 3, 400, 1024, &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't create tree from disk image error %d.\n", error);
 		exit(1);
 	}
 
@@ -98,8 +109,8 @@ int main(void)
 	btree_delete(tmp, 'Z');
 	btree_dump(tmp);
 	/* Add a few more to create a split */
-	btree_insert(tmp, 'T', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'Z', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'T');
+	insert_item(tmp, 'Z');
 	btree_dump(tmp);
 	/* Should cause collapse */
 	btree_delete(tmp, 'A');
@@ -125,7 +136,7 @@ int main(void)
 	btree_delete(tmp, 'B');
 	btree_dump(tmp);
 
-	btree_free(tmp);
+	btree_close(tmp);
 
 	return 0;
 }

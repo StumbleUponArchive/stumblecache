@@ -23,57 +23,55 @@
 
 void setup(btree_tree *tmp)
 {
-	uint32_t data_idx;
-
 	/* Testing with full root node */
-	btree_insert(tmp, 'F', &data_idx);
-	btree_insert(tmp, 'Q', &data_idx);
-	btree_insert(tmp, 'Z', &data_idx);
-	btree_insert(tmp, 'E', &data_idx);
-	btree_insert(tmp, 'A', &data_idx);
-	btree_insert(tmp, 'B', &data_idx);
-	btree_insert(tmp, 'N', &data_idx);
-	btree_insert(tmp, 'G', &data_idx);
-	btree_insert(tmp, 'R', &data_idx);
-	btree_insert(tmp, 'Y', &data_idx);
-	btree_insert(tmp, 'H', &data_idx);
-	btree_insert(tmp, 'C', &data_idx);
-	btree_insert(tmp, 'D', &data_idx);
-	btree_insert(tmp, 'I', &data_idx);
-	btree_insert(tmp, 'L', &data_idx);
-	btree_insert(tmp, 'T', &data_idx);
+	btree_insert(tmp, 'F');
+	btree_insert(tmp, 'Q');
+	btree_insert(tmp, 'Z');
+	btree_insert(tmp, 'E');
+	btree_insert(tmp, 'A');
+	btree_insert(tmp, 'B');
+	btree_insert(tmp, 'N');
+	btree_insert(tmp, 'G');
+	btree_insert(tmp, 'R');
+	btree_insert(tmp, 'Y');
+	btree_insert(tmp, 'H');
+	btree_insert(tmp, 'C');
+	btree_insert(tmp, 'D');
+	btree_insert(tmp, 'I');
+	btree_insert(tmp, 'L');
+	btree_insert(tmp, 'T');
 
-	btree_insert(tmp, 'q', &data_idx);
-	btree_insert(tmp, 'w', &data_idx);
-	btree_insert(tmp, 'e', &data_idx);
-	btree_insert(tmp, 'r', &data_idx);
-	btree_insert(tmp, 't', &data_idx);
-	btree_insert(tmp, 'y', &data_idx);
-	btree_insert(tmp, 'u', &data_idx);
-	btree_insert(tmp, 'i', &data_idx);
-	btree_insert(tmp, 'o', &data_idx);
-	btree_insert(tmp, 'p', &data_idx);
+	btree_insert(tmp, 'q');
+	btree_insert(tmp, 'w');
+	btree_insert(tmp, 'e');
+	btree_insert(tmp, 'r');
+	btree_insert(tmp, 't');
+	btree_insert(tmp, 'y');
+	btree_insert(tmp, 'u');
+	btree_insert(tmp, 'i');
+	btree_insert(tmp, 'o');
+	btree_insert(tmp, 'p');
 
-	btree_insert(tmp, 'S', &data_idx);
-	btree_insert(tmp, 'W', &data_idx);
-	btree_insert(tmp, 'U', &data_idx);
+	btree_insert(tmp, 'S');
+	btree_insert(tmp, 'W');
+	btree_insert(tmp, 'U');
 }
 
 int main(void)
 {
 	btree_tree *tmp;
-	uint32_t data_idx;
+	int error = 0;
 
-	tmp = btree_create("test.mmap", 3, 400, 1024);
+	tmp = btree_create("test.mmap", 3, 400, 1024, &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't create tree from disk image error %d.\n", error);
 		exit(1);
 	}
 
 	setup(tmp);
-	btree_insert(tmp, 'd', &data_idx);
-	btree_insert(tmp, 'f', &data_idx);
-	btree_insert(tmp, 'v', &data_idx);
+	btree_insert(tmp, 'd');
+	btree_insert(tmp, 'f');
+	btree_insert(tmp, 'v');
 
 	btree_delete(tmp, 'i');
 	btree_delete(tmp, 'f');
@@ -82,8 +80,7 @@ int main(void)
 	btree_delete(tmp, 't');
 	btree_dump_dot(tmp);
 
-
-	btree_free(tmp);
+	btree_close(tmp);
 
 	return 0;
 }
