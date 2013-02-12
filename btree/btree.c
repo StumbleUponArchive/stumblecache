@@ -547,8 +547,6 @@ BTREE_API int btree_empty(btree_tree *t)
  */
 BTREE_API int btree_close(btree_tree *t)
 {
-	int error;
-
 	if (close(t->fd) == -1) {
 		return errno;
 	}
@@ -651,14 +649,14 @@ BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t dat
 {
 	void *location;
 	int error;
-	uint32_t *idx;
+	uint32_t idx;
 
 	if (data_size > t->header->item_size) {
 		return 413; /* Request Entity Too Large - data > item_size */
 	}
 
-	if (1 == btree_search_internal(t, t->root, key, idx)) {
-		error = btree_data_lockw(t, *idx);
+	if (1 == btree_search_internal(t, t->root, key, &idx)) {
+		error = btree_data_lockw(t, idx);
 		if (error != 0) {
 			return error;
 		}
@@ -666,12 +664,12 @@ BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t dat
 		return 404; /* Data not found */
 	}
 
-	location = btree_get_data_location(t, *idx);
+	location = btree_get_data_location(t, idx);
 	*((size_t*)location) = data_size;
 	*(time_t*) (location + sizeof(size_t)) = ts;
 	memcpy(location + sizeof(size_t) + sizeof(time_t), data, data_size);
 
-	error = btree_data_unlock(t, *idx);
+	error = btree_data_unlock(t, idx);
 	if (error != 0) {
 		return error;
 	}
@@ -731,14 +729,14 @@ static int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, 
 BTREE_API int btree_search(btree_tree *t, btree_node *node, uint64_t key)
 {
 	int found, error = 0;
-	uint32_t *idx;
+	uint32_t idx;
 
 	error = btree_admin_lockr(t);
 	if (error != 0) {
 		return error;
 	}
 
-	found = btree_search_internal(t, node, key, idx);
+	found = btree_search_internal(t, node, key, &idx);
 
 	error = btree_admin_unlock(t);
 	if (error != 0) {

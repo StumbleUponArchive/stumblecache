@@ -21,76 +21,92 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+static uint32_t insert_item(btree_tree *tmp, uint64_t index) {
+	uint32_t data_idx;
+	size_t *size;
+	time_t *time;
+	void *data;
+
+	btree_insert(tmp, index);
+	btree_get_data(tmp, index, &data_idx, &data, &size, &time);
+	printf("%u\n", data_idx);
+	btree_data_unlock(tmp, data_idx);
+	return data_idx;
+}
+
 int main(void)
 {
 	btree_tree *tmp;
 	uint32_t data_idx;
 	char data[1024];
+	int error = 0;
 
 	memset(data, 4, 1023);
 	memset(data+1023, 0, 1);
 
-	tmp = btree_create("test.mmap", 3, 400, 1024);
+	tmp = btree_create("test.mmap", 3, 400, 1024, &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't create tree from disk image, errno %d.\n", error);
 		exit(1);
 	}
-	btree_insert(tmp, 'A', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'L', &data_idx); printf("%u\n", data_idx);
+
+	insert_item(tmp, 'A');
+	data_idx = insert_item(tmp, 'L');
 	memcpy(tmp->data + data_idx * 1024, data, 1024);
-	btree_insert(tmp, 'D', &data_idx); printf("%u\n", data_idx);
+	data_idx = insert_item(tmp, 'D');
 	memcpy(tmp->data + data_idx * 1024, data, 1024);
-	btree_insert(tmp, 'F', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'F');
 
-	btree_insert(tmp, '4', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, '2', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, '3', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, '5', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, '1', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, '4');
+	insert_item(tmp, '2');
+	insert_item(tmp, '3');
+	insert_item(tmp, '5');
+	insert_item(tmp, '1');
 
-	btree_insert(tmp, 'N', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'P', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'd', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'f', &data_idx); printf("%u\n", data_idx); /* */
-	btree_insert(tmp, 'n', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'p', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'H', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'C', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'B', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'E', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'G', &data_idx); printf("%u\n", data_idx); /* */
+	insert_item(tmp, 'N');
+	insert_item(tmp, 'P');
+	insert_item(tmp, 'd');
+	insert_item(tmp, 'f');
+	insert_item(tmp, 'n');
+	insert_item(tmp, 'p');
+	insert_item(tmp, 'H');
+	insert_item(tmp, 'C');
+	insert_item(tmp, 'B');
+	insert_item(tmp, 'E');
+	insert_item(tmp, 'G');
 
-	btree_insert(tmp, 'I', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'K', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'J', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'M', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'o', &data_idx); printf("%u\n", data_idx); /* */
+	insert_item(tmp, 'I');
+	insert_item(tmp, 'K');
+	insert_item(tmp, 'J');
+	insert_item(tmp, 'M');
+	insert_item(tmp, 'o');
 
-	btree_insert(tmp, 'q', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'r', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'i', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'q');
+	insert_item(tmp, 'r');
+	insert_item(tmp, 'i');
 
-	btree_insert(tmp, 'j', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'k', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 's', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 't', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'm', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'j');
+	insert_item(tmp, 'k');
+	insert_item(tmp, 'd');
+	insert_item(tmp, 't');
+	insert_item(tmp, 'm');
 
-	btree_insert(tmp, 'O', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'Q', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'R', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'S', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'T', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'U', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'O');
+	insert_item(tmp, 'Q');
+	insert_item(tmp, 'R');
+	insert_item(tmp, 'S');
+	insert_item(tmp, 'T');
+	insert_item(tmp, 'U');
 
-	btree_insert(tmp, 'x', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'w', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'y', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'u', &data_idx); printf("%u\n", data_idx);
-	btree_insert(tmp, 'v', &data_idx); printf("%u\n", data_idx);
+	insert_item(tmp, 'x');
+	insert_item(tmp, 'w');
+	insert_item(tmp, 'y');
+	insert_item(tmp, 'u');
+	insert_item(tmp, 'v');
 
 	btree_dump_dot(tmp);
-	btree_free(tmp);
+	btree_close(tmp);
 
 	return 0;
 }

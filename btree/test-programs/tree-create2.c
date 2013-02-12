@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 int main(int argc, char *argv[])
 {
@@ -28,15 +29,24 @@ int main(int argc, char *argv[])
 	char urlBuffer[2048], *data;
 	uint64_t id;
 	uint64_t i = 0;
-	uint32_t data_idx;
+	int error = 0;
 
-	tmp = btree_create("test.mmap", 128, 700000, 2048);
+	tmp = btree_create("tree2.mmap", 128, 700000, 2048, &error);
 	if (!tmp) {
-		printf("Couldn't create tree from disk image.\n");
+		printf("Couldn't create tree from disk image, errno %d.\n", error);
 		exit(1);
 	}
 
+	if (argc < 2) {
+		printf("Please pass a text file via argv to fill up the btree\n");
+		exit(1);	
+	}
+
 	f = fopen(argv[1], "r");
+	if (!f) {
+		printf("Couldn't open file %s, errno %d.\n", argv[1], errno);
+		exit(1);
+	}
 	while (!feof(f)) {
 		fgets(urlBuffer, 2048, f);
 		data = strchr(urlBuffer, ' ');
@@ -44,14 +54,15 @@ int main(int argc, char *argv[])
 			data++;
 			data[-1] = '\0';
 			id = atoll(urlBuffer);
-			if (btree_insert(tmp, id, &data_idx) == 1) {
-				btree_set_data(tmp, data_idx, data, strlen(data), time(NULL));
+			if (btree_insert(tmp, id) == 1) {
+				btree_set_data(tmp, id, data, strlen(data), time(NULL));
 			}
 		}
 		i++;
 	}
 
-	btree_free(tmp);
+	btree_dump(tmp);
+	btree_close(tmp);
 
 	return 0;
 }

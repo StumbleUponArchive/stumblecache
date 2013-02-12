@@ -8,6 +8,18 @@ BINS=tree-search tree-search2 tree-search3 \
 
 all: ${BINS}
 
+test:
+	./tree-create
+	./tree-create2 loremipsum.txt
+	#./tree-search
+	#./tree-search2
+	#./tree-search3 P
+	./tree-create-failures
+	./tree-create-failures2
+
+	rm test.mmap
+	rm tree2.mmap
+
 clean:
 	rm ${BINS}
 
