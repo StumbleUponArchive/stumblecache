@@ -50,6 +50,7 @@
 static btree_node* btree_find_branch(btree_tree *t, btree_node *node, uint64_t key, uint32_t *i);
 static void *btree_get_data_location(btree_tree *t, uint32_t idx);
 static int btree_search_internal(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx);
+static void btree_insert_internal(btree_tree *t, uint64_t key, uint32_t data_idx);
 
 /* ----------------------------------------------------------------
 	Lock APIS
@@ -668,6 +669,51 @@ BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t dat
 	*((size_t*)location) = data_size;
 	*(time_t*) (location + sizeof(size_t)) = ts;
 	memcpy(location + sizeof(size_t) + sizeof(time_t), data, data_size);
+
+	error = btree_data_unlock(t, idx);
+	if (error != 0) {
+		return error;
+	}
+	return 0;
+}
+
+/**
+ * btree_inc_data
+ * @access public
+ * @param btree struct
+ * @param key
+ * @param value
+ * @param time
+ * @return int 0 on success or error value
+ *
+ * Increments the data at key and fills the void pointer with the new value
+ */
+BTREE_API int btree_inc_data(btree_tree *t, uint64_t key, time_t ts)
+{
+	void *location;
+	int error;
+	uint32_t idx;
+	uint64_t *value;
+	size_t data_size = sizeof(uint64_t);
+
+	if (1 == btree_search_internal(t, t->root, key, &idx)) {
+		error = btree_data_lockw(t, idx);
+		if (error != 0) {
+			return error;
+		}
+	} else {
+		dr_set_find_first(&(t->freelist), &idx);
+		btree_insert_internal(t, key, idx);
+		value = 0;
+	}
+
+	location = btree_get_data_location(t, idx);
+	value = (uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
+	*value++;
+
+	*((size_t*)location) = data_size;
+	*(time_t*) (location + sizeof(size_t)) = ts;
+	memcpy(location + sizeof(size_t) + sizeof(time_t), value, data_size);
 
 	error = btree_data_unlock(t, idx);
 	if (error != 0) {

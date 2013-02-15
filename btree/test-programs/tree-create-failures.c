@@ -46,7 +46,7 @@ int main(void)
 
 	if (btree_insert(tmp, 'Q')) {
 		btree_set_data(tmp, 'Q', "HelloWorld2", 10, time(NULL));
-		btree_get_data(tmp, 'Q', &data_idx, (void **)&data, &size, &ts);		
+		btree_get_data(tmp, 'Q', &data_idx, (void **)&data, &size, &ts);
 		printf("%s %zd\n", data, *size);
 		btree_data_unlock(tmp, data_idx);
 	}
