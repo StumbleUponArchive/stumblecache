@@ -652,7 +652,7 @@ BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t dat
 	uint32_t idx;
 
 	if (data_size > t->header->item_size) {
-		return 413; /* Request Entity Too Large - data > item_size */
+		return 414; /* Request URI too long - data > item_size */
 	}
 
 	if (1 == btree_search_internal(t, t->root, key, &idx)) {
@@ -744,6 +744,8 @@ BTREE_API int btree_search(btree_tree *t, btree_node *node, uint64_t key)
 	}
 	if (1 == found) {
 		return 0;
+	} else {
+		return 404; /* key not found */
 	}
 	return error;
 }

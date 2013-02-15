@@ -166,9 +166,11 @@ PHP_METHOD(StumbleCache, getPath);
 PHP_METHOD(StumbleCache, dump);
 PHP_METHOD(StumbleCache, add);
 PHP_METHOD(StumbleCache, replace);
+PHP_METHOD(StumbleCache, set);
 PHP_METHOD(StumbleCache, remove);
 PHP_METHOD(StumbleCache, fetch);
 PHP_METHOD(StumbleCache, exists);
+PHP_METHOD(StumbleCache, getLastError);
 
 /* Reflection information */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_construct, 0, 0, 1)
@@ -195,6 +197,11 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_replace, 0, 0, 2)
 	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_set, 0, 0, 2)
+	ZEND_ARG_INFO(0, key)
+	ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_exists, 0, 0, 1)
 	ZEND_ARG_INFO(0, key)
 ZEND_END_ARG_INFO()
@@ -208,6 +215,9 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_fetch, 0, 0, 1)
 	ZEND_ARG_INFO(0, ttl)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_getlasterror, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
 /* StumbleCache methods */
 zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, __construct,     arginfo_stumblecache_construct, ZEND_ACC_CTOR|ZEND_ACC_PUBLIC)
@@ -216,9 +226,11 @@ zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, dump,            arginfo_stumblecache_dump,      ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, add,             arginfo_stumblecache_add,       ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, replace,         arginfo_stumblecache_replace,   ZEND_ACC_PUBLIC)
+	PHP_ME(StumbleCache, set,             arginfo_stumblecache_set,       ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, exists,          arginfo_stumblecache_exists,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, remove,          arginfo_stumblecache_remove,    ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
+	PHP_ME(StumbleCache, getLastError,    arginfo_stumblecache_getlasterror,ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -568,8 +580,8 @@ PHP_METHOD(StumbleCache, dump)
 /* }}} */
 
 /* {{{ proto bool StumbleCache->add(integer key, mixed value)
-	adds an item to the btree, if the item already exists
-        then no add takes place
+	adds an item to the btree
+	if the item already exists then no add takes place
 */
 PHP_METHOD(StumbleCache, add)
 {
@@ -628,16 +640,127 @@ PHP_METHOD(StumbleCache, add)
 /* }}} */
 
 /* {{{ proto bool StumbleCache->replace(integer key, mixed value)
-	adds an item to the btree, if the item already exists it is replaced
-
-	TODO: error handling mechanism and fix locking so library encapsulates usage
-        create a replace that doesn't check for already exists
+	changes value of item already in btree, does NOT add it if it doesn't exist
 */
 PHP_METHOD(StumbleCache, replace)
 {
-	//TODO: make this do something
+	php_stumblecache_obj *scache_obj;
+	long  key;
+	zval *value;
+
+	size_t   serialized_len;
+	uint32_t data_idx;
+	void    *data, *dummy;
+	size_t  *data_size;
+	time_t  *ts;
+	int error;
+	struct igbinary_memory_manager *mm;
+	struct stumblecache_mm_context context;
+
+	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &key, &value)) {
+		return;
+	}
+
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+
+	error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+	
+	/* Try to get our ptr */
+	if (0 != error) {
+		stumblecache_save_error(scache_obj, "add", error TSRMLS_CC);
+		RETURN_FALSE;
+	} else {
+
+		*ts = time(NULL);
+
+		/* Prepare memory manager for add */
+		context.data = data;
+		context.max_size = scache_obj->cache->header->item_size;
+
+		mm = malloc(sizeof(struct igbinary_memory_manager));
+		mm->alloc = stumblecache_alloc;
+		mm->realloc = stumblecache_realloc;
+		mm->free = stumblecache_free;
+		mm->context = (void*) &context;
+
+		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
+			RETVAL_TRUE;
+		} else {
+			stumblecache_save_error(scache_obj, "add", 406 TSRMLS_CC);
+			RETVAL_FALSE;
+		}
+		free(mm);
+		btree_data_unlock(scache_obj->cache, data_idx);
+		return;
+	}
 }
 /* }}} */
+
+/* {{{ proto bool StumbleCache->set(integer key, mixed value)
+	if the item doesn't exist, adds it
+        if it does exist, replace the value
+        identical to calling add followed by replace on failure
+*/
+PHP_METHOD(StumbleCache, set)
+{
+	php_stumblecache_obj *scache_obj;
+	long  key;
+	zval *value;
+	int error = 0;
+
+	size_t   serialized_len;
+	uint32_t data_idx;
+	void    *data, *dummy;
+	size_t  *data_size;
+	time_t  *ts;
+	struct igbinary_memory_manager *mm;
+	struct stumblecache_mm_context context;
+
+	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &key, &value)) {
+		return;
+	}
+
+	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+
+	/* we'll attempt an insert - if it's 404 ignore and continue */
+	error = btree_insert(scache_obj->cache, key);
+
+	if (error != 409 && error != 0) {
+		stumblecache_save_error(scache_obj, "set", error TSRMLS_CC);	
+		RETURN_FALSE;
+	}
+
+	error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+	/* Try to get our ptr */
+	if (0 != error) {
+		stumblecache_save_error(scache_obj, "set", error TSRMLS_CC);
+		RETURN_FALSE;
+	} else {
+
+		*ts = time(NULL);
+
+		/* Prepare memory manager for add */
+		context.data = data;
+		context.max_size = scache_obj->cache->header->item_size;
+
+		mm = malloc(sizeof(struct igbinary_memory_manager));
+		mm->alloc = stumblecache_alloc;
+		mm->realloc = stumblecache_realloc;
+		mm->free = stumblecache_free;
+		mm->context = (void*) &context;
+
+		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
+			RETVAL_TRUE;
+		} else {
+			RETVAL_FALSE;
+		}
+		free(mm);
+		btree_data_unlock(scache_obj->cache, data_idx);
+		return;
+	}
+}
+/* }}} */
+
 
 /* {{{ proto bool StumbleCache->exists(integer key)
 	checks to see if an item exists in the cache
@@ -648,7 +771,7 @@ PHP_METHOD(StumbleCache, exists)
 	long  key;
 	int error;
 
-	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &key) == FAILURE) {
+	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &key)) {
 		return;
 	}
 
@@ -758,15 +881,43 @@ PHP_METHOD(StumbleCache, getLastError)
 	add_assoc_long(return_value, "code", code);
 	/* todo - take care of error codes that are not errno ones! */
 	if (0 != code) {
-		buf = emalloc(1024);
-		strerror_r(code, buf, 1024);
-		add_assoc_string(return_value, "message", buf, 1);
-		efree(buf);
+
+		switch(code) 
+		{
+		    case 404:
+			add_assoc_string(return_value, "message", "Item not found", 1);
+			break;
+		    case 406:
+			add_assoc_string(return_value, "message", "Error serializing data, not acceptable", 1);
+			break;
+		    case 409:
+			add_assoc_string(return_value, "message", "Conflict, item already exists", 1);
+			break;
+		    case 413:
+			add_assoc_string(return_value, "message", "Maximum number of items reached, could not add additional item", 1);
+			break;
+		    case 414:
+			add_assoc_string(return_value, "message", "Item too large to be stored", 1);
+			break;
+		    case 500:
+			add_assoc_string(return_value, "message", "Internal error, node could not be retrieved", 1);
+			break;
+		    default :
+			buf = emalloc(1024);
+			strerror_r(code, buf, 1024);
+			add_assoc_string(return_value, "message", buf, 1);
+			efree(buf);
+		}
+		add_assoc_string(return_value, "file", scache_obj->error_file, 1);
+		add_assoc_long(return_value, "line", scache_obj->error_line);
+		add_assoc_string(return_value, "method", scache_obj->error_method, 1);
+		
 	} else {
+		
+		add_assoc_string(return_value, "file", estrdup(zend_get_executed_filename(TSRMLS_C)), 0);
+		add_assoc_long(return_value, "line", zend_get_executed_lineno(TSRMLS_C));
 		add_assoc_string(return_value, "message", "No Error", 1);
+		add_assoc_string(return_value, "method", "", 1);
 	}
-	add_assoc_string(return_value, "file", scache_obj->error_file, 1);
-	add_assoc_long(return_value, "line", scache_obj->error_line);
-	add_assoc_string(return_value, "method", scache_obj->error_method, 1);
 }
 /* }}} */
