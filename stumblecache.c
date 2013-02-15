@@ -557,7 +557,7 @@ PHP_METHOD(StumbleCache, getInfo)
 /* {{{ proto bool StumbleCache->dump(void)
 	outputs a dump (via php_printf) of the current
         contents of the opened cache
-TODO: add different output formats for dump
+	TODO: add different output formats for dump
 */
 PHP_METHOD(StumbleCache, dump)
 {
@@ -879,7 +879,6 @@ PHP_METHOD(StumbleCache, getLastError)
 
 	code = scache_obj->error_code;
 	add_assoc_long(return_value, "code", code);
-	/* todo - take care of error codes that are not errno ones! */
 	if (0 != code) {
 
 		switch(code) 
