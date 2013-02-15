@@ -444,8 +444,8 @@ void stumblecache_register_class(TSRMLS_D)
 	stumblecache_ctor_wrapper_func.common.required_num_args = 0;
 	stumblecache_ctor_wrapper_func.common.arg_info = NULL;
 #if PHP_VERSION_ID < 50399
-	stumblecache_ctor_wrapper_func.pass_rest_by_reference = 0;
-	stumblecache_ctor_wrapper_func.return_reference = 0;
+	stumblecache_ctor_wrapper_func.common.pass_rest_by_reference = 0;
+	stumblecache_ctor_wrapper_func.common.return_reference = 0;
 #endif
 	stumblecache_ctor_wrapper_func.internal_function.handler = stumblecache_constructor_wrapper;
 	stumblecache_ctor_wrapper_func.internal_function.module = EG(current_module);
