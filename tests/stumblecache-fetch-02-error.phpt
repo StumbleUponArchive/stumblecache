@@ -1,5 +1,5 @@
 --TEST--
-Stumblecache->getLastError() return values
+Stumblecache->fetch() errors after failed fetch
 --EXTENSIONS--
 igbinary
 --FILE--
@@ -10,32 +10,22 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache(dirname(__FILE__) . '/tests-error', $options);
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-fetch', $options );
 
-var_dump($cache->getLastError(10));
+var_dump($cache->fetch(50));
 var_dump($cache->getLastError());
-$cache->replace(1,1);
+
+var_dump($cache->add(50, "some data"));
+sleep(3);
+var_dump($cache->fetch(50, 2));
 var_dump($cache->getLastError());
 ?>
 --CLEAN--
 <?php
-unlink(dirname(__FILE__) . '/tests-error.scache');
+unlink(dirname(__FILE__) . '/tests-fetch.scache');
 ?>
 --EXPECTF--
-Warning: StumbleCache::getLastError() expects exactly 0 parameters, 1 given in %s on line %d
 NULL
-array(5) {
-  ["code"]=>
-  int(0)
-  ["file"]=>
-  string(%d) "%s"
-  ["line"]=>
-  int(%d)
-  ["message"]=>
-  string(8) "No Error"
-  ["method"]=>
-  string(0) ""
-}
 array(5) {
   ["code"]=>
   int(404)
@@ -46,5 +36,19 @@ array(5) {
   ["line"]=>
   int(%d)
   ["method"]=>
-  string(7) "replace"
+  string(5) "fetch"
+}
+bool(true)
+NULL
+array(5) {
+  ["code"]=>
+  int(410)
+  ["message"]=>
+  string(48) "Gone, item ttl %d is past ttl %d"
+  ["file"]=>
+  string(%d) "%s"
+  ["line"]=>
+  int(%d)
+  ["method"]=>
+  string(5) "fetch"
 }
