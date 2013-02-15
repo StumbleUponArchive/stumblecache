@@ -1,5 +1,5 @@
 --TEST--
-Fetching items with expired TTL.
+clone Stumblecache class
 --EXTENSIONS--
 igbinary
 --FILE--
@@ -12,19 +12,11 @@ $options = array(
 );
 $cache = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
 
-var_dump( $cache->add( 50, "some data" ) );
-var_dump( $cache->fetch( 50 ) );
-var_dump( $cache->fetch( 50, 2 ) );
-sleep( 3 );
-var_dump( $cache->fetch( 50, 2 ) );
-
+clone $cache;
 ?>
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-add.scache');
 ?>
---EXPECT--
-bool(true)
-string(9) "some data"
-string(9) "some data"
-NULL
+--EXPECTF--
+Fatal error: Trying to clone an uncloneable object of class StumbleCache in %s on line %d

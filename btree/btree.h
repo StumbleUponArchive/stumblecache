@@ -1,3 +1,22 @@
+/*
+   +----------------------------------------------------------------------+
+   | PHP Version 5                                                        |
+   +----------------------------------------------------------------------+
+   | Copyright (c) 2010-2013 StumbleUpon Inc.                             |
+   +----------------------------------------------------------------------+
+   | This source file is subject to version 3.01 of the PHP license,      |
+   | that is bundled with this package in the file LICENSE, and is        |
+   | available through the world-wide-web at the following url:           |
+   | http://www.php.net/license/3_01.txt                                  |
+   | If you did not receive a copy of the PHP license and are unable to   |
+   | obtain it through the world-wide-web, please send a note to          |
+   | license@php.net so we can mail you a copy immediately.               |
+   +----------------------------------------------------------------------+
+   | Authors: Derick Rethans    <derick@derickrethans.nl>                 |
+   |          Elizabeth M Smith <auroraeosrose@php.net>                   |
+   +----------------------------------------------------------------------+
+ */
+
 #define BTREE_HEADER_SIZE 4096
 #define BTREE_MAX_ORDER       102
 #define BTREE_T(t)            (t->header->order)
@@ -44,24 +63,30 @@ typedef struct {
 	dr_set        freelist;
 	void         *nodes;
 	void         *data;
-	char         *path;
+	const char   *path;
 	uint64_t      file_size;
 } btree_tree;
 
-btree_tree *btree_open(char *path);
-btree_tree *btree_create(char *path, uint32_t order, uint32_t nr_of_items, size_t data_size);
-int btree_close(btree_tree *t);
-void btree_empty(btree_tree *t);
-void btree_free(btree_tree *t);
+#if defined(__GNUC__) && __GNUC__ >= 4
+#	define BTREE_API __attribute__ ((visibility("default")))
+#else
+#	define BTREE_API
+#endif
 
-void *btree_get_data(btree_tree *t, uint32_t idx, size_t *data_size, time_t *ts);
-int btree_set_data(btree_tree *t, uint32_t idx, void *data, size_t data_size, time_t ts);
-void btree_get_data_ptr(btree_tree *t, uint32_t idx, void **data, size_t **data_size, time_t **ts);
-int btree_data_unlock(btree_tree *t, uint32_t idx);
+BTREE_API btree_tree *btree_open(const char *path, int *error);
+BTREE_API btree_tree *btree_create(const char *path, uint32_t order, uint32_t nr_of_items, size_t data_size, int *error);
+BTREE_API int btree_close(btree_tree *t);
+BTREE_API int btree_empty(btree_tree *t);
 
-int btree_search(btree_tree *t, btree_node *node, uint64_t key, uint32_t *idx);
-int btree_insert(btree_tree *t, uint64_t key, uint32_t *data_idx);
-int btree_delete(btree_tree *t, uint64_t key);
+BTREE_API int btree_get_data(btree_tree *t, uint64_t key, uint32_t *idx, void **data, size_t **data_size, time_t **ts);
+BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t data_size, time_t ts);
+BTREE_API int btree_get_data_ptr(btree_tree *t, uint64_t key, uint32_t *idx, void **data, size_t **data_size, time_t **ts);
+BTREE_API int btree_data_unlock(btree_tree *t, uint32_t idx);
 
-void btree_dump(btree_tree *t);
-void btree_dump_dot(btree_tree *t);
+BTREE_API int btree_search(btree_tree *t, btree_node *node, uint64_t key);
+BTREE_API int btree_insert(btree_tree *t, uint64_t key);
+BTREE_API int btree_delete(btree_tree *t, uint64_t key);
+
+BTREE_API int btree_dump(btree_tree *t);
+BTREE_API int btree_dump_test(btree_tree *t);
+BTREE_API int btree_dump_dot(btree_tree *t);

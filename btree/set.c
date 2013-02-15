@@ -1,10 +1,52 @@
+/*
+   +----------------------------------------------------------------------+
+   | PHP Version 5                                                        |
+   +----------------------------------------------------------------------+
+   | Copyright (c) 2010-2013 StumbleUpon Inc.                             |
+   +----------------------------------------------------------------------+
+   | This source file is subject to version 3.01 of the PHP license,      |
+   | that is bundled with this package in the file LICENSE, and is        |
+   | available through the world-wide-web at the following url:           |
+   | http://www.php.net/license/3_01.txt                                  |
+   | If you did not receive a copy of the PHP license and are unable to   |
+   | obtain it through the world-wide-web, please send a note to          |
+   | license@php.net so we can mail you a copy immediately.               |
+   +----------------------------------------------------------------------+
+   | Authors: Derick Rethans    <derick@derickrethans.nl>                 |
+   |          Elizabeth M Smith <auroraeosrose@php.net>                   |
+   +----------------------------------------------------------------------+
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
 #include "set.h"
 
-dr_set *dr_set_create(unsigned int size)
+/* printf statement */
+#ifdef HAVE_STUMBLECACHE
+#	ifdef HAVE_CONFIG_H
+#		include "config.h"
+#	endif
+#	include "php.h"
+#	define DRSET_PRINT(...) { php_printf(__VA_ARGS__); }
+#else
+#	define DRSET_PRINT(...) { printf(__VA_ARGS__); }
+#endif
+
+/* ----------------------------------------------------------------
+	Public API
+------------------------------------------------------------------*/
+
+/**
+ * dr_set_create
+ * @param btree struct pointer, caller owns memory
+ * @param path to the file to use, must be absolute
+ * @return int 0 on success or errno on failure
+ *
+ * dr_set or null on failure
+ */
+DRSET_API dr_set *dr_set_create(unsigned int size)
 {
 	dr_set *tmp;
 
@@ -13,52 +55,85 @@ dr_set *dr_set_create(unsigned int size)
 	}
 
 	tmp = calloc(1, sizeof(dr_set));
+	if (tmp == NULL) {
+		return NULL;
+	}
 	tmp->size = size;
 	tmp->setinfo = calloc(1, DR_SET_SIZE(size));
+	if (tmp->setinfo == NULL) {
+		free(tmp);
+		return NULL;
+	}
 
 	dr_set_init(tmp);
 
 	return tmp;
 }
 
-inline void dr_set_init(dr_set *set)
+/**
+ * dr_set_init
+ * @param struct allocated by caller
+ * @return void
+ *
+ * cleans out everything inside the dr_set down to the last byte
+ */
+DRSET_API inline void dr_set_init(dr_set *set)
 {
 	unsigned int i;
 
-	// mass unset everything but the last byte
+	/* mass unset everything but the last byte */
 	memset(set->setinfo, 0xff, set->size / 8);
 
-	// unset bits in the last byte
+	/* unset bits in the last byte */
 	for (i = 0; i < set->size % 8; i++) {
 		dr_set_remove(set, i + (set->size / 8) * 8);
 	}
 }
 
-void dr_set_free(dr_set *set)
+/**
+ *dr_set_free
+ * @param struct allocated by caller
+ * @return void
+ *
+ * frees data for the set
+ */
+DRSET_API void dr_set_free(dr_set *set)
 {
 	free(set->setinfo);
 	free(set);
 }
 
-
-void dr_set_dump(dr_set *set)
+/**
+ * dr_set_dump
+ * @param struct allocated by caller
+ * @return void
+ *
+ * print dump of output
+ */
+DRSET_API void dr_set_dump(dr_set *set)
 {
 	unsigned int byte, bit; 
 
-	printf("SIZE: %d\n", set->size);
+	DRSET_PRINT("SIZE: %d\n", set->size);
 	for (byte = 0; byte < ceil((set->size + 7) / 8); byte++) {
-		printf("BYTE: %d (%0x)\n", byte, set->setinfo[byte]);
+		DRSET_PRINT("BYTE: %d (%0x)\n", byte, set->setinfo[byte]);
 		for (bit = 0; bit < 8; bit++) {
-			printf(" %c", set->setinfo[byte] & (1 << bit) ? '1' : '0');
+			DRSET_PRINT(" %c", set->setinfo[byte] & (1 << bit) ? '1' : '0');
 		}
-		printf("\n");
+		DRSET_PRINT("\n");
 	}
-	printf("\n");
+	DRSET_PRINT("\n");
 }
 
-
-
-inline void dr_set_add(dr_set *set, unsigned int position)
+/**
+ * dr_set_add
+ * @param struct allocated by caller
+ * @param see if there is something in that position
+ * @return void
+ *
+ * add new position
+ */
+DRSET_API inline void dr_set_add(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -73,7 +148,15 @@ inline void dr_set_add(dr_set *set, unsigned int position)
 	*byte = *byte & ~(1 << bit);
 }
 
-inline void dr_set_remove(dr_set *set, unsigned int position)
+/**
+ * dr_set_remove
+ * @param struct allocated by caller
+ * @param see if there is something in that position
+ * @return void
+ *
+ * cleans out everything in one position
+ */
+DRSET_API inline void dr_set_remove(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -88,8 +171,15 @@ inline void dr_set_remove(dr_set *set, unsigned int position)
 	*byte = *byte | (1 << bit);
 }
 
-
-inline int dr_set_in(dr_set *set, unsigned int position)
+/**
+ * dr_set_in
+ * @param dr_set struct, caller owns
+ * @param see if there is something in that position
+ * @return 1 if found, 0 if not found
+ *
+ * finds first available position in dr_set
+ */
+DRSET_API inline int dr_set_in(dr_set *set, unsigned int position)
 {
 	unsigned char *byte;
 	unsigned int   bit;
@@ -104,7 +194,15 @@ inline int dr_set_in(dr_set *set, unsigned int position)
 	return (*byte & (1 << bit));
 }
 
-inline int dr_set_find_first(dr_set *set, unsigned int *position)
+/**
+ * dr_set_find_first
+ * @param dr_set struct, caller owns
+ * @param position to be filled in by call
+ * @return 1 if found, 0 if not found
+ *
+ * finds first available position in dr_set
+ */
+DRSET_API inline int dr_set_find_first(dr_set *set, unsigned int *position)
 {
 	unsigned int i, j;
 

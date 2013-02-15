@@ -60,3 +60,4 @@ tests/*.php
 tests/*.sh
 tmp-php.ini
 php_test_results_*.txt
+autom4te.cache/
