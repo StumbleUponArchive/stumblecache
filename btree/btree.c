@@ -682,38 +682,51 @@ BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t dat
  * @access public
  * @param btree struct
  * @param key
- * @param value
- * @param time
  * @return int 0 on success or error value
  *
- * Increments the data at key and fills the void pointer with the new value
+ * Increments the data at key
  */
-BTREE_API int btree_inc_data(btree_tree *t, uint64_t key, time_t ts)
+BTREE_API int btree_inc_data(btree_tree *t, uint64_t key)
 {
 	void *location;
 	int error;
 	uint32_t idx;
-	uint64_t *value;
+	uint64_t value;
 	size_t data_size = sizeof(uint64_t);
 
+	/* already exists? */
 	if (1 == btree_search_internal(t, t->root, key, &idx)) {
 		error = btree_data_lockw(t, idx);
 		if (error != 0) {
 			return error;
 		}
 	} else {
-		dr_set_find_first(&(t->freelist), &idx);
-		btree_insert_internal(t, key, idx);
-		value = 0;
+	/* doesn't exist, create */
+		error = btree_insert(t, key);
+		if (error != 0) {
+			return error;
+		}
+		if (1 == btree_search_internal(t, t->root, key, &idx)) {
+			error = btree_data_lockw(t, idx);
+			if (error != 0) {
+				return error;
+			}
+		} else {
+			return 404; /* Node not found */
+		}
+		error = btree_data_lockw(t, idx);
+		if (error != 0) {
+			return error;
+		}
 	}
 
 	location = btree_get_data_location(t, idx);
-	value = (uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
-	*value++;
+	value = *(uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
+	value++;
 
 	*((size_t*)location) = data_size;
-	*(time_t*) (location + sizeof(size_t)) = ts;
-	memcpy(location + sizeof(size_t) + sizeof(time_t), value, data_size);
+	*(time_t*) (location + sizeof(size_t)) = time(NULL);
+	*(uint64_t *) (location + sizeof(size_t) + sizeof(time_t)) = value;
 
 	error = btree_data_unlock(t, idx);
 	if (error != 0) {
