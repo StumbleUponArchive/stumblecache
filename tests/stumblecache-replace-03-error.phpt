@@ -32,5 +32,5 @@ array(5) {
   ["line"]=>
   int(%d)
   ["method"]=>
-  string(3) "add"
+  string(7) "replace"
 }

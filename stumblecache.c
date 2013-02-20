@@ -129,6 +129,9 @@ struct _php_stumblecache_obj {
         int           error_line;
         char         *error_file;
         int           error_code;
+	long          error_asked_ttl;
+	long          error_data_ttl;
+	long          default_ttl;
 	zend_bool     is_constructed;
 };
 static zend_class_entry *stumblecache_ce;
@@ -341,10 +344,10 @@ static void stumblecache_constructor_wrapper(INTERNAL_FUNCTION_PARAMETERS) {
 /* }}} */
 
 /* {{{ validate our options array items */
-static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_items, uint32_t *max_datasize TSRMLS_DC)
+static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_items, uint32_t *max_datasize, long *default_ttl TSRMLS_DC)
 {
 	zval **dummy;
-	int    set_count = 0;
+	int    has_order = 0, has_maxitems = 0, has_maxdatasize = 0;
 
 	if (Z_TYPE_P(options) == IS_ARRAY) {
 		if (zend_hash_find(HASH_OF(options), "order", 6, (void**) &dummy) == SUCCESS) {
@@ -354,7 +357,7 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The order should be in between 3 and %d, %d was requested.", BTREE_MAX_ORDER, *order);
 				return 0;
 			}
-			set_count++;
+			has_order = 1;
 		}
 		if (zend_hash_find(HASH_OF(options), "max_items", 10, (void**) &dummy) == SUCCESS) {
 			convert_to_long(*dummy);
@@ -363,7 +366,7 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_items should setting be in between 1 and %d, %ld was requested.", 1024 * 1048576, (long int) *max_items);
 				return 0;
 			}
-			set_count++;
+			has_maxitems = 1;
 		}
 		if (zend_hash_find(HASH_OF(options), "max_datasize", 13, (void**) &dummy) == SUCCESS) {
 			convert_to_long(*dummy);
@@ -372,9 +375,17 @@ static int scache_parse_options(zval *options, uint32_t *order, uint32_t *max_it
 				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The max_datasize setting should be in between 1 and %d, %ld was requested.", 1048576, (long int) *max_datasize);
 				return 0;
 			}
-			set_count++;
+			has_maxdatasize = 1;
 		}
-		if (set_count != 3) {
+		if (zend_hash_find(HASH_OF(options), "default_ttl", 12, (void**) &dummy) == SUCCESS) {
+			convert_to_long(*dummy);
+			*default_ttl = Z_LVAL_PP(dummy);
+			if (*default_ttl < 1 || *default_ttl > 1048576) {
+				php_error_docref(NULL TSRMLS_CC, E_WARNING, "The default_ttl setting should be in between 1 and %d, %ld was requested.", 1048576, (long int) *default_ttl);
+				return 0;
+			}
+		}
+		if (has_order == 0 || has_maxdatasize == 0 || has_maxitems == 0) {
 			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Not all three options are set (need: 'order', 'max_items' and 'max_datasize').");
 		} else {
 			return 1;
@@ -392,6 +403,7 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 	char *path;
 	uint32_t order, max_items, max_datasize;
 	int error;
+	long default_ttl = 0;
 
 	/* Create filepath */
 	if (cache_id[0] != '/') {
@@ -403,7 +415,7 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 	obj->cache = btree_open(path, &error);
 	obj->path  = NULL;
 	if (!obj->cache) {
-		if (!scache_parse_options(options, &order, &max_items, &max_datasize TSRMLS_CC)) {
+		if (!scache_parse_options(options, &order, &max_items, &max_datasize, &default_ttl TSRMLS_CC)) {
 			efree(path);
 			return 0;
 		}
@@ -418,6 +430,9 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 	obj->error_line = 0;
 	obj->error_file = NULL;
 	obj->error_method = NULL;
+	obj->default_ttl = default_ttl;
+	obj->error_asked_ttl = 0;
+	obj->error_data_ttl = 0;
 	obj->is_constructed = 1;
 	return 1;
 }
@@ -466,6 +481,16 @@ void stumblecache_save_error(php_stumblecache_obj *scache_obj, const char * meth
 	scache_obj->error_file = estrdup(zend_get_executed_filename(TSRMLS_C));
 	scache_obj->error_method = estrdup(method);
 	scache_obj->error_code = code;
+	scache_obj->error_asked_ttl = 0;
+	scache_obj->error_data_ttl = 0;
+}
+
+/* {{{ helper to error information with ttl info */
+void stumblecache_save_error_ttls(php_stumblecache_obj *scache_obj, const char * method, int code, long ttl_request, long ttl_data TSRMLS_DC)
+{
+	stumblecache_save_error(scache_obj, method, code TSRMLS_CC);
+	scache_obj->error_asked_ttl = ttl_request;
+	scache_obj->error_data_ttl = ttl_data;
 }
 
 /* ----------------------------------------------------------------
@@ -667,7 +692,7 @@ PHP_METHOD(StumbleCache, replace)
 	
 	/* Try to get our ptr */
 	if (0 != error) {
-		stumblecache_save_error(scache_obj, "add", error TSRMLS_CC);
+		stumblecache_save_error(scache_obj, "replace", error TSRMLS_CC);
 		RETURN_FALSE;
 	} else {
 
@@ -686,7 +711,7 @@ PHP_METHOD(StumbleCache, replace)
 		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
 			RETVAL_TRUE;
 		} else {
-			stumblecache_save_error(scache_obj, "add", 406 TSRMLS_CC);
+			stumblecache_save_error(scache_obj, "replace", 406 TSRMLS_CC);
 			RETVAL_FALSE;
 		}
 		free(mm);
@@ -813,8 +838,9 @@ PHP_METHOD(StumbleCache, remove)
 }
 /* }}} */
 
-/* {{{ proto mixed StumbleCache->fetch(integer key)
-	fetch's data from the cache
+/* {{{ proto mixed StumbleCache->fetch(integer key[, integer ttl])
+	fetch's data from the cache, optionally times out data by ttl provided, otherwise
+        it uses the default ttl
 */
 PHP_METHOD(StumbleCache, fetch)
 {
@@ -823,7 +849,7 @@ PHP_METHOD(StumbleCache, fetch)
 	uint32_t data_idx;
 	void    *data;
 	size_t *data_size;
-	time_t *ts;
+	time_t *ts, now;
 	int error;
 	long   ttl = STUMBLECACHE_G(default_ttl);
 
@@ -832,6 +858,9 @@ PHP_METHOD(StumbleCache, fetch)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	if(scache_obj->default_ttl) {
+		ttl = scache_obj->default_ttl;
+	}
 
 	error = btree_get_data(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 
@@ -840,13 +869,15 @@ PHP_METHOD(StumbleCache, fetch)
 		btree_data_unlock(scache_obj->cache, data_idx);
 
 		/* Check whether the data is fresh */
-		if (time(NULL) < *ts + ttl) {
+		now = time(NULL);
+		if (now < *ts + ttl) {
 			if (*data_size) {
 				igbinary_unserialize((uint8_t *) data, *data_size, &return_value TSRMLS_CC);
 				return;
 			}
 		} else {
 			btree_delete(scache_obj->cache, key);
+			stumblecache_save_error_ttls(scache_obj, "fetch", 410, ttl + now, *ts TSRMLS_CC);	 /* GONE */
 		}
 	} else {
 		stumblecache_save_error(scache_obj, "fetch", error TSRMLS_CC);	
@@ -891,6 +922,10 @@ PHP_METHOD(StumbleCache, getLastError)
 			break;
 		    case 409:
 			add_assoc_string(return_value, "message", "Conflict, item already exists", 1);
+			break;
+		    case 410:
+			spprintf(&buf, 256, "Gone, item ttl %ld is past ttl %ld", scache_obj->error_data_ttl , scache_obj->error_asked_ttl);
+			add_assoc_string(return_value, "message", buf, 0);
 			break;
 		    case 413:
 			add_assoc_string(return_value, "message", "Maximum number of items reached, could not add additional item", 1);
