@@ -21,6 +21,7 @@ var_dump($cache->set(10, 10, 10));
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-set.scache');
+unlink(dirname(__FILE__) . '/tests-set.scstats');
 ?>
 --EXPECTF--
 Warning: StumbleCache::set() expects exactly 2 parameters, 0 given in %s on line %d

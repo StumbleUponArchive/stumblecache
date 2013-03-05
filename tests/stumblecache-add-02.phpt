@@ -18,6 +18,7 @@ var_dump( $cache->fetch( 50 ) );
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-add.scache');
+unlink(dirname(__FILE__) . '/tests-add.scstats');
 ?>
 --EXPECT--
 bool(false)

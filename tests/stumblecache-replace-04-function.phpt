@@ -22,6 +22,7 @@ var_dump($cache->fetch(10));
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-replace.scache');
+unlink(dirname(__FILE__) . '/tests-replace.scstats');
 ?>
 --EXPECT--
 string(9) "some data"

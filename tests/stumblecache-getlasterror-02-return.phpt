@@ -20,6 +20,7 @@ var_dump($cache->getLastError());
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-error.scache');
+unlink(dirname(__FILE__) . '/tests-error.scstats');
 ?>
 --EXPECTF--
 Warning: StumbleCache::getLastError() expects exactly 0 parameters, 1 given in %s on line %d
