@@ -61,6 +61,7 @@ function quit()
 	$file = $GLOBALS['cache']->getPath();
 	unset( $GLOBALS['cache'] );
 	unlink( $file );
+	unlink( str_replace('.scache', '.scstats', $file) );
 }
 
 function info()
