@@ -700,6 +700,9 @@ BTREE_API int btree_inc_data(btree_tree *t, uint64_t key)
 		if (error != 0) {
 			return error;
 		}
+		location = btree_get_data_location(t, idx);
+		value = *(uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
+		value++;
 	} else {
 	/* doesn't exist, create */
 		error = btree_insert(t, key);
@@ -718,11 +721,10 @@ BTREE_API int btree_inc_data(btree_tree *t, uint64_t key)
 		if (error != 0) {
 			return error;
 		}
+		location = btree_get_data_location(t, idx);
+		value = *(uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
+		value = 1;
 	}
-
-	location = btree_get_data_location(t, idx);
-	value = *(uint64_t *) (location + sizeof(size_t) + sizeof(time_t));
-	value++;
 
 	*((size_t*)location) = data_size;
 	*(time_t*) (location + sizeof(size_t)) = time(NULL);
@@ -1318,6 +1320,10 @@ proceed:
  *
  * Removes a node at key from the btree
  * Locks the entire tree until complete
+ *
+ * TODO: there is currently a hard to trigger bug in the delete algorithm
+ * if you add at least 100 items and delete them in the order they were added
+ * (FIFO) you'll lose a set of nodes from 48 to 52 and some more in the 70's and 90''s
  */
 BTREE_API int btree_delete(btree_tree *t, uint64_t key)
 {

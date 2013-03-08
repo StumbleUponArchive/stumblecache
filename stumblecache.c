@@ -32,33 +32,45 @@
 
 enum STUMBLECACHE_STATS
 {
+	fetch,
 	fetch_hit,
 	fetch_miss,
 	fetch_timeout,
+	replace,
 	replace_write,
 	replace_miss,
+	set,
 	set_insert,
-	set_miss,
 	set_write,
-	delete_item,
+	delete,
+	delete_hit,
+	delete_miss,
+	exists,
 	exists_hit,
 	exists_miss,
+	add,
 	add_exists,
 	add_insert,
 } stumblecache_stats;
 
 char* stumblecache_stats_strings[] = {
+	"fetch",
 	"fetch_hit",
 	"fetch_miss",
 	"fetch_timeout",
+	"replace",
 	"replace_write",
 	"replace_miss",
+	"set",
 	"set_insert",
-	"set_miss",
-	"delete_item",
+	"set_write",
+	"delete",
+	"delete_hit",
+	"delete_miss",
+	"exists",
 	"exists_hit",
 	"exists_miss",
-	"set_write",
+	"add",
 	"add_exists",
 	"add_insert"
 };
@@ -165,18 +177,6 @@ PHP_GINIT_FUNCTION(stumblecache)
 		if (!stumblecache_globals->global_stat_file) {
 			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Could not initialize global stats.");
 		}
-/* TODO: if the file is new, add data defaults
-1. total fetch hits
-2. total fetch misses
-3. total fetches
-4. total adds
-5. total updates
-6. total add misses
-7. total update misses
-8. total object created
-9. total new files created
-global stats created date
-array of opened mmap'd files? individual open counts for files? */
 	}
 	efree(default_path);
 
@@ -254,6 +254,8 @@ PHP_METHOD(StumbleCache, fetch);
 PHP_METHOD(StumbleCache, exists);
 PHP_METHOD(StumbleCache, getLastError);
 PHP_METHOD(StumbleCache, getStats);
+PHP_METHOD(StumbleCache, getGlobalStats);
+PHP_METHOD(StumbleCache, clearGlobalStats);
 
 /* Reflection information */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_construct, 0, 0, 1)
@@ -300,7 +302,14 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_getlasterror, 0, 0, 0)
 ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_getstats, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_getglobalstats, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stumblecache_clearglobalstats, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
 /* StumbleCache methods */
@@ -317,6 +326,8 @@ zend_function_entry stumblecache_methods[] = {
 	PHP_ME(StumbleCache, fetch,           arginfo_stumblecache_fetch,     ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, getLastError,    arginfo_stumblecache_getlasterror,ZEND_ACC_PUBLIC)
 	PHP_ME(StumbleCache, getStats,        arginfo_stumblecache_getstats,  ZEND_ACC_PUBLIC)
+	PHP_ME(StumbleCache, getGlobalStats,  arginfo_stumblecache_getglobalstats,  ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+	PHP_ME(StumbleCache, clearGlobalStats,  arginfo_stumblecache_clearglobalstats,  ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
 	ZEND_FE_END
 };
 
@@ -525,23 +536,15 @@ static int stumblecache_initialize(php_stumblecache_obj *obj, char *cache_id, zv
 	if (!obj->stats) {
 		obj->stats = btree_create(stats, 3, 3000, 1024, &error);
 		if (!obj->stats) {
-			/* todo: throw an error here */
+			btree_close(obj->stats);
+			efree(cache);
+			efree(stats);
+			return 0;
 		}
 	} else if(reset_stats) {
 		btree_empty(obj->stats);
 	}
 	efree(stats);
-
-/* TODO: if the file is new, add data defaults
-1. total fetch hits
-2. total fetch misses
-3. total fetches
-4. total adds
-5. total updates
-6. total add misses
-7. total update misses
-stats created date */
-
 	obj->path = cache;
 	obj->error_code = 0;
 	obj->error_line = 0;
@@ -610,20 +613,11 @@ void stumblecache_save_error_ttls(php_stumblecache_obj *scache_obj, const char *
 	scache_obj->error_data_ttl = ttl_data;
 }
 
-/* {{{ helper for logging global fetch hits, fetch misses, misses,  */
-void stumblecache_log_global(php_stumblecache_obj *scache_obj, const char * method, int code TSRMLS_DC)
+/* {{{ helper for logging stats */
+void stumblecache_log_stat(php_stumblecache_obj *scache_obj, enum STUMBLECACHE_STATS type TSRMLS_DC)
 {
-	if (scache_obj->error_file) {
-		efree(scache_obj->error_file);
-	}
-	if (scache_obj->error_method) {
-		efree(scache_obj->error_method);
-	}
-
-	scache_obj->error_line = zend_get_executed_lineno(TSRMLS_C);
-	scache_obj->error_file = estrdup(zend_get_executed_filename(TSRMLS_C));
-	scache_obj->error_method = estrdup(method);
-	scache_obj->error_code = code;
+	btree_inc_data(scache_obj->stats, type);
+	btree_inc_data(STUMBLECACHE_G(global_stat_file), type);
 }
 
 /* ----------------------------------------------------------------
@@ -644,9 +638,12 @@ void stumblecache_log_global(php_stumblecache_obj *scache_obj, const char * meth
 
         Will throw an exception if there is a problem creating the stumblecache file
 
-	TODO: get backend library errors and provide
-        meaningful error messages and check open_base_dir setting!
-        also move initialization in here, parsing code can stay separate
+	TODO: get backend library errors and provide meaningful error messages
+	check open_base_dir setting
+        move initialization code into here for better error handling, parsing code can stay separate
+	count opened objects in global stats file
+	keep global file with all mmaped files in process
+	possibly add creation dates to scstats files
 */
 PHP_METHOD(StumbleCache, __construct)
 {
@@ -663,13 +660,12 @@ PHP_METHOD(StumbleCache, __construct)
 	}
 	zend_restore_error_handling(&error_handling TSRMLS_CC);
 
-	/* write mmap file to global tree? */
-
 }
 /* }}} */
 
 /* {{{ proto string StumbleCache->getPath(void)
 	returns the absolute path and filename (including extension) of the file currently in use
+	TODO: possibly return an array with cache file, stats file, global stats file
 */
 PHP_METHOD(StumbleCache, getPath)
 {
@@ -749,14 +745,17 @@ PHP_METHOD(StumbleCache, add)
 	php_stumblecache_obj *scache_obj;
 	long  key;
 	zval *value;
+	int error;
 
 	if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &key, &value)) {
 		return;
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	stumblecache_log_stat(scache_obj, add TSRMLS_CC);
+	error = btree_insert(scache_obj->cache, key);
 
-	if (0 == btree_insert(scache_obj->cache, key)) {
+	if (0 == error) {
 		size_t   serialized_len;
 		uint32_t data_idx;
 		void    *data, *dummy;
@@ -769,9 +768,6 @@ PHP_METHOD(StumbleCache, add)
 		error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 		/* Try to get our ptr */
 		if (0 != error) {
-			if(error == 409) {
-				btree_inc_data(scache_obj->stats, add_exists);
-			}
 			stumblecache_save_error(scache_obj, "add", error TSRMLS_CC);
 			RETURN_FALSE;
 		} else {
@@ -789,7 +785,7 @@ PHP_METHOD(StumbleCache, add)
 			mm->context = (void*) &context;
 
 			if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
-				btree_inc_data(scache_obj->stats, add_insert);
+				stumblecache_log_stat(scache_obj, add_insert TSRMLS_CC);
 				RETVAL_TRUE;
 			} else {
 				RETVAL_FALSE;
@@ -797,6 +793,14 @@ PHP_METHOD(StumbleCache, add)
 			free(mm);
 			btree_data_unlock(scache_obj->cache, data_idx);
 			return;
+		}
+	} else {
+		if (error != 409 && error != 0) {
+			stumblecache_save_error(scache_obj, "add", error TSRMLS_CC);	
+			RETURN_FALSE;
+		}
+		if (error == 409) {
+			stumblecache_log_stat(scache_obj, add_exists TSRMLS_CC);
 		}
 	}
 
@@ -827,13 +831,14 @@ PHP_METHOD(StumbleCache, replace)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	stumblecache_log_stat(scache_obj, replace TSRMLS_CC);
 
 	error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 	
 	/* Try to get our ptr */
 	if (0 != error) {
 		if(error == 404) {
-			btree_inc_data(scache_obj->stats, replace_miss);
+			stumblecache_log_stat(scache_obj, replace_miss TSRMLS_CC);
 		}
 		stumblecache_save_error(scache_obj, "replace", error TSRMLS_CC);
 		RETURN_FALSE;
@@ -852,7 +857,7 @@ PHP_METHOD(StumbleCache, replace)
 		mm->context = (void*) &context;
 
 		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
-			btree_inc_data(scache_obj->stats, replace_write);
+			stumblecache_log_stat(scache_obj, replace_write TSRMLS_CC);
 			RETVAL_TRUE;
 		} else {
 			stumblecache_save_error(scache_obj, "replace", 406 TSRMLS_CC);
@@ -876,6 +881,7 @@ PHP_METHOD(StumbleCache, set)
 	long  key;
 	zval *value;
 	int error = 0;
+	zend_bool is_insert = 0;
 
 	size_t   serialized_len;
 	uint32_t data_idx;
@@ -890,6 +896,7 @@ PHP_METHOD(StumbleCache, set)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	stumblecache_log_stat(scache_obj, set TSRMLS_CC);
 
 	/* we'll attempt an insert - if it's 409 ignore and continue */
 	error = btree_insert(scache_obj->cache, key);
@@ -899,15 +906,13 @@ PHP_METHOD(StumbleCache, set)
 		RETURN_FALSE;
 	}
 	if (error == 409) {
-		btree_inc_data(scache_obj->stats, set_insert);
+		is_insert = 1;
+		stumblecache_log_stat(scache_obj, set_insert TSRMLS_CC);
 	}
 
 	error = btree_get_data_ptr(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 	/* Try to get our ptr */
 	if (0 != error) {
-		if(error == 404) {
-			btree_inc_data(scache_obj->stats, set_miss);
-		}
 		stumblecache_save_error(scache_obj, "set", error TSRMLS_CC);
 		RETURN_FALSE;
 	} else {
@@ -925,7 +930,9 @@ PHP_METHOD(StumbleCache, set)
 		mm->context = (void*) &context;
 
 		if (igbinary_serialize_ex((uint8_t **) &dummy, data_size, value, mm TSRMLS_CC) == 0) {
-			btree_inc_data(scache_obj->stats, set_write);
+			if(0 == is_insert) {
+				stumblecache_log_stat(scache_obj, set_write TSRMLS_CC);
+			}
 			RETVAL_TRUE;
 		} else {
 			RETVAL_FALSE;
@@ -952,13 +959,15 @@ PHP_METHOD(StumbleCache, exists)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	stumblecache_log_stat(scache_obj, exists TSRMLS_CC);
+
 	error = btree_search(scache_obj->cache, scache_obj->cache->root, key);
 
 	if (0 == error) {
-		btree_inc_data(scache_obj->stats, exists_hit);
+		stumblecache_log_stat(scache_obj, exists_hit TSRMLS_CC);
 		RETURN_TRUE;
 	} else {
-		btree_inc_data(scache_obj->stats, exists_miss);
+		stumblecache_log_stat(scache_obj, exists_miss TSRMLS_CC);
 		stumblecache_save_error(scache_obj, "exists", error TSRMLS_CC);
 		RETURN_FALSE;
 	}
@@ -980,12 +989,14 @@ PHP_METHOD(StumbleCache, remove)
 	}
 
 	scache_obj = (php_stumblecache_obj *) zend_object_store_get_object(getThis() TSRMLS_CC);
+	stumblecache_log_stat(scache_obj, delete TSRMLS_CC);
 
 	error = btree_delete(scache_obj->cache, key);
 	if (error == 0) {
-		btree_inc_data(scache_obj->stats, delete_item);
+		stumblecache_log_stat(scache_obj, delete_hit TSRMLS_CC);
 		RETURN_TRUE;
 	} else {
+		stumblecache_log_stat(scache_obj, delete_miss TSRMLS_CC);
 		stumblecache_save_error(scache_obj, "remove", error TSRMLS_CC);
 		RETURN_FALSE;
 	}
@@ -1015,6 +1026,7 @@ PHP_METHOD(StumbleCache, fetch)
 	if(scache_obj->default_ttl) {
 		ttl = scache_obj->default_ttl;
 	}
+	stumblecache_log_stat(scache_obj, fetch TSRMLS_CC);
 
 	error = btree_get_data(scache_obj->cache, key, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 
@@ -1027,16 +1039,16 @@ PHP_METHOD(StumbleCache, fetch)
 		if (now < *ts + ttl) {
 			if (*data_size) {
 				igbinary_unserialize((uint8_t *) data, *data_size, &return_value TSRMLS_CC);
-				btree_inc_data(scache_obj->stats, fetch_hit);
+				stumblecache_log_stat(scache_obj, fetch_hit TSRMLS_CC);
 				return;
 			}
 		} else {
 			btree_delete(scache_obj->cache, key);
-			btree_inc_data(scache_obj->stats, (uint64_t) fetch_timeout);
+			stumblecache_log_stat(scache_obj, fetch_timeout TSRMLS_CC);
 			stumblecache_save_error_ttls(scache_obj, "fetch", 410, ttl + now, *ts TSRMLS_CC);	 /* GONE */
 		}
 	} else {
-		btree_inc_data(scache_obj->stats, fetch_miss);
+		stumblecache_log_stat(scache_obj, fetch_miss TSRMLS_CC);
 		stumblecache_save_error(scache_obj, "fetch", error TSRMLS_CC);
 	}
 	return; /* Implicit return NULL; */
@@ -1134,12 +1146,12 @@ PHP_METHOD(StumbleCache, getStats)
 
 	array_init(return_value);
 
-	for(i = fetch_hit; i<=add_insert; i++) {
+	for(i = fetch; i<=add_insert; i++) {
 		error = btree_get_data(scache_obj->stats, i, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
 
 		if (0 == error) {
 			/* unlock, we're good */
-			btree_data_unlock(scache_obj->cache, data_idx);
+			btree_data_unlock(scache_obj->stats, data_idx);
 			add_assoc_long(return_value, stumblecache_stats_strings[i], *data);
 		} else {
 			add_assoc_long(return_value, stumblecache_stats_strings[i], 0);
@@ -1147,5 +1159,60 @@ PHP_METHOD(StumbleCache, getStats)
 
 		
 	}
+}
+/* }}} */
+
+/* {{{ proto array StumbleCache::getGlobalStats(void)
+	returns an array of statistics from the global btree statistics file
+*/
+PHP_METHOD(StumbleCache, getGlobalStats)
+{
+	int error = 0;
+	uint32_t data_idx;
+	long *data;
+	size_t *data_size;
+	time_t *ts;
+	int i;
+
+	if (FAILURE == zend_parse_parameters_none()) {
+		return;
+	}
+
+	array_init(return_value);
+
+	for(i = fetch; i<=add_insert; i++) {
+		error = btree_get_data(STUMBLECACHE_G(global_stat_file), i, &data_idx, (void**) &data, (size_t**) &data_size, (time_t**) &ts);
+
+		if (0 == error) {
+			/* unlock, we're good */
+			btree_data_unlock(STUMBLECACHE_G(global_stat_file), data_idx);
+			add_assoc_long(return_value, stumblecache_stats_strings[i], *data);
+		} else {
+			add_assoc_long(return_value, stumblecache_stats_strings[i], 0);
+		}
+		
+	}
+}
+/* }}} */
+
+/* {{{ proto bool StumbleCache::clearGlobalStats(void)
+	empties the current global stats file, since the file
+        even if unlinked, will be undeletable for the duration of the process
+*/
+PHP_METHOD(StumbleCache, clearGlobalStats)
+{
+	int error = 0;
+	uint32_t data_idx;
+	long *data;
+	size_t *data_size;
+	time_t *ts;
+	int i;
+
+	if (FAILURE == zend_parse_parameters_none()) {
+		return;
+	}
+
+
+	btree_empty(STUMBLECACHE_G(global_stat_file));
 }
 /* }}} */
