@@ -10,7 +10,7 @@ $options = array(
 	'max_items' => 64,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-delete-02', $options );
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-delete', $options );
 $path = $cache->getPath();
 
 for ( $i = 0; $i < 50; $i++ )
@@ -45,8 +45,11 @@ for ( $i = 1; $i <= 100; $i++ )
 		echo "Item $i had wrong contents: ", $res, " vs ", sprintf( "ITEM %04d\n", $i ), "\n";
 	}
 }
-
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-delete.scache');
+unlink(dirname(__FILE__) . '/tests-delete.scstats');
 ?>
 --EXPECTF--
 $cache->add( %d, "ITEM %s" );

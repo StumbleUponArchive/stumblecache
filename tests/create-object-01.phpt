@@ -16,5 +16,6 @@ echo get_class($o), "\n";
 $path = $o->getPath();
 $o = NULL;
 unlink( $path );
+unlink( str_replace('.scache', '.scstats', $path) );
 --EXPECT--
 StumbleCache

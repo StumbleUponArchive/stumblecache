@@ -10,7 +10,7 @@ $options = array(
 	'max_items' => 64,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-delete-02', $options );
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-delete', $options );
 $path = $cache->getPath();
 
 for ( $i = 0; $i < 80; $i++ )
@@ -50,7 +50,11 @@ for ( $i = 0; $i < 100; $i++ )
 	}
 }
 
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-delete.scache');
+unlink(dirname(__FILE__) . '/tests-delete.scstats');
 ?>
 --EXPECT--
 Item 64 could not be added
