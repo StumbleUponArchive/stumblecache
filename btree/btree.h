@@ -55,7 +55,7 @@ typedef struct {
 	uint32_t root_node_idx;
 } btree_header;
 
-typedef struct {
+struct _btree_tree {
 	btree_header *header;
 	btree_node   *root;
 	int           fd;
@@ -65,7 +65,9 @@ typedef struct {
 	void         *data;
 	const char   *path;
 	uint64_t      file_size;
-} btree_tree;
+};
+
+typedef struct _btree_tree btree_tree;
 
 #if defined(__GNUC__) && __GNUC__ >= 4
 #	define BTREE_API __attribute__ ((visibility("default")))
@@ -82,6 +84,7 @@ BTREE_API int btree_get_data(btree_tree *t, uint64_t key, uint32_t *idx, void **
 BTREE_API int btree_set_data(btree_tree *t, uint64_t key, void *data, size_t data_size, time_t ts);
 BTREE_API int btree_get_data_ptr(btree_tree *t, uint64_t key, uint32_t *idx, void **data, size_t **data_size, time_t **ts);
 BTREE_API int btree_data_unlock(btree_tree *t, uint32_t idx);
+BTREE_API int btree_inc_data(btree_tree *t, uint64_t key);
 
 BTREE_API int btree_search(btree_tree *t, btree_node *node, uint64_t key);
 BTREE_API int btree_insert(btree_tree *t, uint64_t key);

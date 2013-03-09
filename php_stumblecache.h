@@ -29,15 +29,21 @@ extern zend_module_entry stumblecache_module_entry;
 #include "TSRM.h"
 #endif
 
-PHP_MINIT_FUNCTION(stumblecache);
-PHP_MINFO_FUNCTION(stumblecache);
+/* forward declaration of btree_tree struct */
+typedef struct _btree_tree btree_tree;
 
 ZEND_BEGIN_MODULE_GLOBALS(stumblecache)
-	char *default_cache_dir;
-	long  default_ttl;
+	char      *default_cache_dir;
+	long       default_ttl;
+	btree_tree *global_stat_file;
 ZEND_END_MODULE_GLOBALS(stumblecache) 
 
 typedef struct _php_stumblecache_obj php_stumblecache_obj;
+
+PHP_MINIT_FUNCTION(stumblecache);
+PHP_MINFO_FUNCTION(stumblecache);
+PHP_GINIT_FUNCTION(stumblecache);
+PHP_GSHUTDOWN_FUNCTION(stumblecache);
 
 #ifdef ZTS
 # define STUMBLECACHE_G(v) TSRMG(stumblecache_globals_id, zend_stumblecache_globals *, v)

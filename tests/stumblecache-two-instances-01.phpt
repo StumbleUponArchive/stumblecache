@@ -10,8 +10,8 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache1 = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
-$cache2 = new StumbleCache( dirname(__FILE__) . '/tests-add', $options );
+$cache1 = new StumbleCache( dirname(__FILE__) . '/tests-two', $options );
+$cache2 = new StumbleCache( dirname(__FILE__) . '/tests-two', $options );
 
 var_dump( $cache1->add( 50, "some data" ) );
 var_dump( $cache2->add( 60, "some more data" ) );
@@ -20,7 +20,8 @@ var_dump( $cache2->add( 70, "some yes more data" ) );
 ?>
 --CLEAN--
 <?php
-unlink(dirname(__FILE__) . '/tests-add.scache');
+unlink(dirname(__FILE__) . '/tests-two.scache');
+unlink(dirname(__FILE__) . '/tests-two.scstats');
 ?>
 --EXPECT--
 bool(true)

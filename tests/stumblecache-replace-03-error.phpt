@@ -19,6 +19,7 @@ var_dump($cache->getLastError());
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-replace.scache');
+unlink(dirname(__FILE__) . '/tests-replace.scstats');
 ?>
 --EXPECTF--
 bool(false)

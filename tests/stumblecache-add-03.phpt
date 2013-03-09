@@ -37,6 +37,7 @@ for ( $i = 0; $i < 1025; $i++ )
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-add.scache');
+unlink(dirname(__FILE__) . '/tests-add.scstats');
 ?>
 --EXPECT--
 Item 1024 could not be added

@@ -10,15 +10,17 @@ $options = array(
 	'max_items' => 1024,
 	'max_datasize' => 32,
 );
-$cache = new StumbleCache( 'tests-remove', $options );
-$path = $cache->getPath();
+$cache = new StumbleCache( dirname(__FILE__) . '/tests-delete', $options );
 
 var_dump( $cache->remove( 50 ) );
 var_dump( $cache->add( 50, "some data" ) );
 var_dump( $cache->remove( 50 ) );
 var_dump( $cache->remove( 50 ) );
-
-unlink( $path );
+?>
+--CLEAN--
+<?php
+unlink(dirname(__FILE__) . '/tests-delete.scache');
+unlink(dirname(__FILE__) . '/tests-delete.scstats');
 ?>
 --EXPECT--
 bool(false)

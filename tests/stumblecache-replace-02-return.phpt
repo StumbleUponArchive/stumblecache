@@ -22,6 +22,7 @@ var_dump($cache->replace(10, "my data"));
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-replace.scache');
+unlink(dirname(__FILE__) . '/tests-replace.scstats');
 ?>
 --EXPECTF--
 Warning: StumbleCache::replace() expects exactly 2 parameters, 0 given in %s on line %d

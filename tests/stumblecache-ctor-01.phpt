@@ -6,6 +6,7 @@ igbinary
 <?php
 // Initialise the cache
 $options = array(
+	'foobar',
 	array('order' => 3, 'max_items' => 1024, 'max_datasize' => 32),
 	array('order' => 2, 'max_items' => 1024, 'max_datasize' => 32),
 	array('order' => 3, 'max_items' => 12319781222, 'max_datasize' => 32),
@@ -15,6 +16,40 @@ $options = array(
 	array('order' => 3, 'max_datasize' => 32),
 );
 
+// not enough args
+try {
+	$cache = new StumbleCache();
+	$path = $cache->getPath();
+	var_dump( $cache->getInfo() );
+	unlink( $path );
+	unlink( str_replace('.scache', '.scstats', $path));
+} catch(Exception $e) {
+	echo $e->getMessage(), PHP_EOL;
+}
+
+// too many args
+try {
+	$cache = new StumbleCache(1, 2, 3);
+	$path = $cache->getPath();
+	var_dump( $cache->getInfo() );
+	unlink( $path );
+	unlink( str_replace('.scache', '.scstats', $path));
+} catch(Exception $e) {
+	echo $e->getMessage(), PHP_EOL;
+}
+
+// wrong arg type #1
+try {
+	$cache = new StumbleCache(array(), array());
+	$path = $cache->getPath();
+	var_dump( $cache->getInfo() );
+	unlink( $path );
+	unlink( str_replace('.scache', '.scstats', $path));
+} catch(Exception $e) {
+	echo $e->getMessage(), PHP_EOL;
+}
+
+// options args validation
 foreach ( $options as $optionTest )
 {
 	try {
@@ -22,6 +57,7 @@ foreach ( $options as $optionTest )
 		$path = $cache->getPath();
 		var_dump( $cache->getInfo() );
 		unlink( $path );
+		unlink( str_replace('.scache', '.scstats', $path));
 	} 
 	catch ( Exception $e ) 
 	{
@@ -30,6 +66,10 @@ foreach ( $options as $optionTest )
 }
 ?>
 --EXPECT--
+StumbleCache::__construct() expects exactly 2 parameters, 0 given
+StumbleCache::__construct() expects exactly 2 parameters, 3 given
+StumbleCache::__construct() expects parameter 1 to be string, array given
+StumbleCache::__construct() expects parameter 2 to be array, string given
 array(6) {
   ["version"]=>
   int(1)

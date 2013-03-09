@@ -23,6 +23,7 @@ var_dump($cache->getLastError());
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-fetch.scache');
+unlink(dirname(__FILE__) . '/tests-fetch.scstats');
 ?>
 --EXPECTF--
 NULL

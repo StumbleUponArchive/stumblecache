@@ -47,8 +47,11 @@ var_dump( $cache->add( 50, "some data" ) );
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/good-cache.scache');
+unlink(dirname(__FILE__) . '/good-cache.scstats');
 unlink(dirname(__FILE__) . '/bad-cache.scache');
+unlink(dirname(__FILE__) . '/bad-cache.scstats');
 unlink(dirname(__FILE__) . '/works-cache.scache');
+unlink(dirname(__FILE__) . '/works-cache.scstats');
 ?>
 --EXPECT--
 bool(true)

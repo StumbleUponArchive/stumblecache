@@ -22,6 +22,7 @@ var_dump($cache->exists(10));
 --CLEAN--
 <?php
 unlink(dirname(__FILE__) . '/tests-exists.scache');
+unlink(dirname(__FILE__) . '/tests-exists.scstats');
 ?>
 --EXPECTF--
 Warning: StumbleCache::exists() expects exactly 1 parameter, 0 given in %s on line %d
